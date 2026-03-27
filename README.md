@@ -75,3 +75,7 @@ Response:
 ## Testing notes
 - Add tests in `Azaniah/authentication/tests.py` for each endpoint with expected success and failure flows.
 
+## Pull and Merge
+- whenever you checkout to the main branch, pull always
+- then git checkout "-new branch"
+- merge the subsidiary branches with the main branch when work on them is complete
