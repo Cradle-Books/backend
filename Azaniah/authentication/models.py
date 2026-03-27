@@ -5,11 +5,9 @@ from django.db import models
 
 class Account(models.Model):
     email = models.EmailField(unique=True)
-    username = models.CharField(max_length=150, blank=True)
-    first_name = models.CharField(max_length=150, blank=True)
-    last_name = models.CharField(max_length=150, blank=True)
-    password = models.CharField(max_length=255)
-    google_id = models.CharField(max_length=255, blank=True, null=True)
+    First_name = models.CharField(max_length=150, blank=True)
+    Last_name = models.CharField(max_length=150, blank=True)
+    Password = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
