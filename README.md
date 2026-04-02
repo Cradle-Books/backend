@@ -62,10 +62,35 @@ Response:
 ## Model info
 - `Azaniah/authentication/models.py` has `Account` custom user model
 - `Account.verify_otp()` calls `create_django_user()` to create `django.contrib.auth.User` after verification
+- `Profile` model: one-to-one relationship with Account; stores optional user details (username, phone, country, address)
+- `Favourite_genres` (ManyToMany): users can select multiple genres for recommendations and friend matching
+- `Genre` model: pre-defined book genres (fantasy, romance, sci-fi, mystery, etc.) with key and name fields
+
+### Account Model
+- Email (unique, required)
+- First_name, Last_name (optional)
+- Password (auto-hashed on save using Django's make_password)
+
+### Profile Model
+- Username, Phone, Country, Address (all optional)
+- Favourite_genres (ManyToMany to Genre)
+- created_at, updated_at timestamps
+- Validation ensures genres are from valid GENRE_CHOICES list
+
+### Available Genres
+Action, Biography, Children, Contemporary Fiction, Dystopian, Fantasy, Graphic Novel, Historical Fiction, Horror, Literary Fiction, Mystery, Others, Religion & Spirituality, Romance, Science Fiction, Thriller & Suspense, Travel, True Crime, Young Adult
+
+## Email Integration
+- Gmail API integration (`gmail_utils.py`) for sending OTPs and confirmation emails
+- OAuth2 authentication with credentials.json
+- Service account uses Gmail API v1 with send scope
+- Token auto-refresh on expiry
 
 ## Settings
-- Email is currently `console.EmailBackend` for dev output
+- Email is currently `console.EmailBackend` for dev output (update to Gmail in production)
 - `PROFILE_URL = 'http://localhost:8000/profile/'`
+- JWT authentication enabled for protected endpoints
+- REST framework configured with JWT token support
 
 ## Run locally
 1. `python manage.py makemigrations authentication`
