@@ -93,12 +93,12 @@ class Profile(models.Model):
     @property
     def firstname(self):
         """Access firstname from Account"""
-        return self.account.Firstname
+        return self.account.First_name
     
     @property
     def lastname(self):
         """Access lastname from Account"""
-        return self.account.Lastname
+        return self.account.Last_name
     
     @property
     def email(self):
