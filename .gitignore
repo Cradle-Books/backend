@@ -1,3 +1,5 @@
 credentials.json
 token.json
 .env
+__pycache__/
+db.sqlite3
