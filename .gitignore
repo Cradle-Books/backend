@@ -2,3 +2,4 @@ credentials.json
 .env
 __pycache__/
 db.sqlite3
+token.json
