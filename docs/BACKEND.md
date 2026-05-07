@@ -1007,10 +1007,17 @@ The Books module provides book search functionality, combining local database re
 - `page` (integer, required): Page number for pagination (starts at 1)
 - `page_size` (integer, optional): Number of results per page (default: 10)
 
-**Request Example**:
+**Request Example** (Query String Format):
 ```
 GET /books/search/?q=the%20hobbit&page=1&page_size=10
 ```
+
+**Important**: Since this is a GET request, parameters go in the URL query string, **NOT** as JSON in the request body. This is not `request.data`; use `request.GET` to access parameters.
+
+**Testing in Postman**:
+- Method: GET
+- URL: `http://localhost:8000/api/books/search/`
+- Params tab: Add `q`, `page`, `page_size` as key-value pairs (don't use raw JSON body)
 
 **Response (200 OK)**:
 ```json
