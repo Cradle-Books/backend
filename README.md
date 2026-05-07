@@ -100,6 +100,69 @@ Action, Biography, Children, Contemporary Fiction, Dystopian, Fantasy, Graphic N
 ## Testing notes
 - Add tests in `Azaniah/authentication/tests.py` for each endpoint with expected success and failure flows.
 
+## Books API Documentation
+
+Base URL: `http://localhost:8000/api/books/`
+
+### 1. Search Books
+- `GET /api/books/search/`
+- Query Parameters:
+  - `q` (string, required): Search query (book title)
+  - `page` (integer, required): Page number (starts at 1)
+  - `page_size` (integer, optional, default: 10): Results per page
+
+Response:
+- `200 OK` on success with paginated results
+- `400 Bad Request` if query missing or params invalid
+- `503 Service Unavailable` if API unavailable
+
+Sample Response:
+```json
+{
+  "source": "db",
+  "page": 1,
+  "page_size": 10,
+  "results": [
+    {
+      "id": 1,
+      "title": "The Hobbit",
+      "author": "J.R.R. Tolkien",
+      "cover": "https://example.com/cover.jpg",
+      "release_date": 1937,
+      "genre": ["fantasy", "adventure"]
+    }
+  ]
+}
+```
+
+## Book Model Info
+
+### Book Model
+- `title` (CharField, max 300): Book title
+- `author` (CharField, max 150): Author name
+- `release_date` (IntegerField, nullable): Publication year
+- `genre` (JSONField): List of genre tags (e.g., `["fantasy", "adventure"]`)
+- `cover` (URLField, nullable): Book cover image URL
+- `description` (CharField, max 15000): Book description
+- `external_id` (CharField, unique): Open Library ID or external reference
+
+**Storage**: Local database stores frequently searched or popular books for quick lookups
+
+### UserBook Model - User's Reading List
+- `user` (ForeignKey to User): Which user owns this entry
+- `book` (ForeignKey to Book): Which book is being tracked
+- `status` (CharField): One of `none`, `want`, `reading`, `finished`
+- `ratings` (PositiveSmallIntegerField, nullable): 1-5 star rating or custom
+- `review` (TextField, nullable): User's written review
+
+**Constraint**: `unique_together('user', 'book')` — Each user can only have one entry per book
+
+**Usage**:
+- Track user's "want to read" list
+- Store "currently reading" status
+- Record completed books with ratings and reviews
+- Build reading history and recommendation engine
+
 ## Pull and Merge
 - whenever you checkout to the main branch, pull always
 - then git checkout "-new branch"

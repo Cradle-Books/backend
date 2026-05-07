@@ -981,3 +981,188 @@ Use in requests:
 {{base_url}}/profile/
 Authorization: Bearer {{access_token}}
 ```
+
+---
+
+## Books API {#books-api}
+
+### Overview
+
+The Books module provides book search functionality, combining local database results with the Open Library API for comprehensive coverage.
+
+**Base URL**: `http://localhost:8000/api/books/`
+
+### Search Books Endpoint
+
+#### 1. SEARCH BOOKS
+
+**Endpoint**: `GET /books/search/`  
+**Auth Required**: ❌ No  
+**Rate Limit**: None (for now)
+
+**Purpose**: Search for books by title with dual-source results (local database + Open Library API)
+
+**Query Parameters**:
+- `q` (string, required): Book title or keyword to search for
+- `page` (integer, required): Page number for pagination (starts at 1)
+- `page_size` (integer, optional): Number of results per page (default: 10)
+
+**Request Example**:
+```
+GET /books/search/?q=the%20hobbit&page=1&page_size=10
+```
+
+**Response (200 OK)**:
+```json
+{
+  "source": "db",
+  "page": 1,
+  "page_size": 10,
+  "results": [
+    {
+      "id": 5,
+      "title": "The Hobbit",
+      "author": "J.R.R. Tolkien",
+      "cover": "https://example.com/cover.jpg",
+      "release_date": 1937,
+      "genre": ["fantasy", "adventure"]
+    },
+    {
+      "id": 12,
+      "title": "The Hobbit: The Prelude",
+      "author": "J.R.R. Tolkien",
+      "cover": "https://example.com/prelude.jpg",
+      "release_date": 2020,
+      "genre": ["fantasy"]
+    }
+  ]
+}
+```
+
+**Response Fields Explained**:
+- `source`: Where results came from (`"db"` = database only, `"api"` = Open Library API)
+- `page`: Current page number
+- `page_size`: Number of results returned
+- `results`: Array of book objects
+  - `id`: Database ID (only present for DB results)
+  - `title`: Book title
+  - `author`: Author name
+  - `cover`: URL to book cover image (may be empty)
+  - `release_date`: Publication year (integer)
+  - `genre`: List of genre tags
+
+**Search Logic**: 
+1. First, searches local database for books matching the query (case-insensitive)
+2. If database has enough results to fill the page, returns immediately
+3. If database results are incomplete, fills the rest from Open Library API
+4. Results are ordered by edition count (popularity) when from API
+
+**Possible Errors**:
+```json
+// Missing query parameter
+{
+  "message": "The Title of the book is required"
+}
+
+// Invalid page number (must be integer)
+{
+  "message": "invalid literal for int()"
+}
+
+// API service unavailable
+{
+  "message": "API was unable to process the request"
+}
+```
+
+**HTTP Status Codes**:
+- `200 OK`: Search successful, results returned
+- `400 Bad Request`: Missing required parameters
+- `503 Service Unavailable`: Open Library API is down and DB results incomplete
+
+### Pagination Details
+
+**Page-based Pagination**:
+- First page: `page=1`
+- Second page: `page=2`
+- Results calculated: `start = (page - 1) * page_size`, `end = page * page_size`
+
+**Example Pagination Flow**:
+```
+page=1, page_size=10  → Results 0-9
+page=2, page_size=10  → Results 10-19
+page=3, page_size=10  → Results 20-29
+```
+
+**Default Behavior**:
+- `page_size` defaults to 10 if omitted
+- Always use query param `page` explicitly
+
+### Hybrid Search Strategy
+
+**Why Two Sources?**
+- **Database**: Store popular/frequently searched books for faster lookups
+- **Open Library API**: Access millions of books for comprehensive coverage
+- **Hybrid**: Best of both worlds — instant local results + fallback to external API
+
+**When Each Source is Used**:
+1. Database is queried first (fast, indexed)
+2. If DB fills the page completely, return immediately (most common)
+3. If DB has fewer results than `page_size`, query Open Library API for missing results
+4. Open Library results are filtered and cleaned before returning
+
+### Open Library Integration
+
+The search endpoint integrates with the **Open Library API** (`https://openlibrary.org/search.json`).
+
+**How it Works**:
+- Sends search query to Open Library
+- Retrieves books sorted by edition count (popularity)
+- Filters out incomplete/invalid entries
+- Extracts relevant fields (title, author, cover, genres)
+- Removes duplicates already in database
+
+**Limitations**:
+- Cover images may not be available for all books
+- Genre data comes from Open Library's subject tags (may vary)
+- Release dates are estimated from first edition
+
+### Book Model Structure
+
+**Database Fields**:
+```python
+class Book(models.Model):
+    title           # CharField, max 300 chars
+    author          # CharField, max 150 chars
+    release_date    # IntegerField (year), nullable
+    genre           # JSONField (list of genre tags)
+    cover           # URLField, nullable
+    description     # CharField, max 15000 chars
+    external_id     # CharField, unique (Open Library ID or custom)
+```
+
+**Purpose**: Store book metadata for quick local lookups and recommendations
+
+### Frontend Integration Notes
+
+**Example Frontend Request**:
+```javascript
+fetch('/api/books/search/?q=harry%20potter&page=1&page_size=15')
+  .then(res => res.json())
+  .then(data => {
+    console.log(data.results);  // Array of book objects
+    console.log(data.source);   // Where results came from
+  })
+```
+
+**Pagination in UI**:
+- Show `page_size` results per screen
+- Add prev/next buttons that increment `page` param
+- Display current page and total (estimate from API response when available)
+
+**Filtering Results**:
+- Filter by genre on frontend after fetching
+- Sort by release date within results if needed
+- Display cover images with fallback for missing URLs
+
+---

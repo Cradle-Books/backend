@@ -493,6 +493,288 @@ This is the correct pattern for ManyToMany relationships.
 
 ---
 
+## Book Model and UserBook Relationships
+
+### Book Model
+
+The `Book` model represents a book in the catalog.
+
+```python
+class Book(models.Model):
+    title = models.CharField(max_length=300)
+    author = models.CharField(max_length=150)
+    release_date = models.IntegerField(null=True, blank=True)  # Year only
+    genre = models.JSONField(default=list, blank=True)  # List of genre tags
+    cover = models.URLField(blank=True)  # Book cover image URL
+    description = models.CharField(max_length=15000)
+    external_id = models.CharField(max_length=100, unique=True)  # Open Library ID or custom
+
+    def __str__(self):
+        return self.title
+```
+
+**Key Design Decisions**:
+- **JSONField for genre**: Flexible list of strings (e.g., `["fantasy", "adventure"]`) from external sources
+- **external_id (unique)**: Prevents duplicate books from Open Library or other APIs
+- **Nullable release_date**: Not all books have clear publication dates
+- **description (CharField, not TextField)**: Fixed max length for consistency
+- **cover (URLField)**: Stores external image URLs, not file uploads
+
+**Use Cases**:
+- Search results from both local DB and Open Library API
+- Book recommendations based on user preferences
+- Tracking user's reading list and ratings
+
+### UserBook Model
+
+The `UserBook` model is a through table that tracks a user's relationship with books.
+
+```python
+class UserBook(models.Model):
+    class Status(models.TextChoices):
+        NONE = 'none', 'None'
+        WANT = 'want', 'Want to Read'
+        READING = 'reading', 'Reading'
+        FINISHED = 'finished', 'Finished'
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE
+    )
+    book = models.ForeignKey(
+        Book,
+        on_delete=models.CASCADE,
+        related_name='book_info'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.NONE
+    )
+    ratings = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-5 or custom
+    review = models.TextField(null=True, blank=True)  # User's written review
+
+    class Meta:
+        unique_together = ('user', 'book')  # User can't add same book twice
+
+    def __str__(self):
+        return f"{self.user.username} - {self.book.title}"
+```
+
+**Key Design Decisions**:
+- **ForeignKey to AUTH_USER_MODEL**: Links to Django's User model via settings reference (flexible)
+- **ForeignKey to Book with CASCADE**: Delete book → delete all related UserBook entries
+- **unique_together constraint**: Each user can only have ONE entry per book (prevents duplicates)
+- **Status field**: TextChoices with readable display names
+- **Nullable ratings/review**: User can track status without leaving a review yet
+
+**Relationship**: Many-to-Many between User and Book, but with extra data (status, ratings, review)
+
+**Use Cases**:
+- "Mark as want to read" / "Mark as reading" / "Mark as finished"
+- Store user ratings (1-5 stars)
+- Store user reviews and comments
+- Track reading history and statistics
+- Recommend books based on user's reading habits
+
+### How UserBook Works
+
+**Scenario 1: User finds book and adds to reading list**
+```python
+user = User.objects.get(username='john')
+book = Book.objects.get(external_id='open_library_123')
+
+# Create a tracking entry
+user_book = UserBook.objects.create(
+    user=user,
+    book=book,
+    status=UserBook.Status.WANT  # "Want to Read"
+)
+```
+
+**Scenario 2: User updates status after reading**
+```python
+user_book = UserBook.objects.get(user=user, book=book)
+user_book.status = UserBook.Status.FINISHED
+user_book.ratings = 5  # 5-star rating
+user_book.review = "Amazing book! Loved every page."
+user_book.save()
+```
+
+**Scenario 3: Query user's reading list**
+```python
+# Get all books user has read
+finished_books = UserBook.objects.filter(
+    user=user,
+    status=UserBook.Status.FINISHED
+).select_related('book')
+
+for entry in finished_books:
+    print(f"{entry.book.title}: {entry.ratings}/5 stars")
+```
+
+**Scenario 4: Prevent duplicate entries**
+```python
+# This will throw IntegrityError (unique_together violation)
+UserBook.objects.create(
+    user=user,
+    book=book,  # Same user-book pair already exists
+    status=UserBook.Status.WANT
+)  # ❌ FAILS - unique_together prevents this
+
+# Instead, update existing entry
+user_book, created = UserBook.objects.get_or_create(
+    user=user,
+    book=book,
+    defaults={'status': UserBook.Status.WANT}
+)
+if not created:  # Already existed
+    user_book.status = UserBook.Status.READING
+    user_book.save()
+```
+
+---
+
+## Hybrid Book Search Strategy
+
+### The Problem
+
+Books need to come from multiple sources:
+- **Local database**: For quick lookups, popular/cached books
+- **External API**: For comprehensive coverage of millions of books
+
+### The Solution: Dual-Source Search
+
+The `SearchBookView` implements a **smart hybrid search** that:
+
+1. **Queries database first** (fast, indexed)
+2. **If DB fills the page**, returns immediately (most common case)
+3. **If DB incomplete**, fills the gap with API results
+4. **Cleans and deduplicates** API results
+
+### Implementation Details
+
+**Search Algorithm**:
+```python
+def search_books(query, page, page_size):
+    # Step 1: Query database
+    start = (page - 1) * page_size
+    end = page * page_size
+    db_books = Book.objects.filter(title__icontains=query)[start:end]
+    db_results = format_results(db_books)
+    
+    # Step 2: Check if DB results fill the page
+    if len(db_results) == page_size:
+        return {"source": "db", "results": db_results}
+    
+    # Step 3: Fill gap with API results
+    needed = page_size - len(db_results)
+    api_results = query_open_library(query, needed)
+    
+    # Step 4: Merge and deduplicate
+    combined = db_results + api_results
+    return {"source": "hybrid", "results": combined[:page_size]}
+```
+
+**Benefits**:
+- **Speed**: DB-only results are instant (no external API call)
+- **Coverage**: API fallback provides access to millions of books
+- **Efficiency**: Only calls API when necessary
+- **Consistency**: Same interface regardless of source
+
+### API Integration (Open Library)
+
+**Endpoint Used**: `https://openlibrary.org/search.json`
+
+**Request Parameters**:
+```
+q=       # Search query (book title, author, etc.)
+page=    # Page number for API pagination
+limit=   # Results per page
+```
+
+**Open Library Response** (example):
+```json
+{
+  "docs": [
+    {
+      "key": "/works/OL45883W",
+      "title": "The Hobbit",
+      "author_name": ["J.R.R. Tolkien"],
+      "first_publish_year": 1937,
+      "subject": ["Fantasy", "Adventure", "Dragons"],
+      "edition_count": 200,
+      "cover_i": 5383570  // Cover ID for image construction
+    }
+  ]
+}
+```
+
+**Data Extraction**:
+```python
+for item in api_response['docs']:
+    book = {
+        'title': item['title'],
+        'author': item['author_name'][0] if item.get('author_name') else 'Unknown',
+        'release_date': item.get('first_publish_year'),
+        'genre': item.get('subject', [])[:3],  # First 3 subjects
+        'cover': f"https://covers.openlibrary.org/b/id/{item.get('cover_i')}-M.jpg" if item.get('cover_i') else '',
+        'external_id': item['key'],
+        'description': ''
+    }
+```
+
+**Deduplication**:
+```python
+existing_ids = {book.id for book in db_results}
+for api_book in api_results:
+    if api_book['external_id'] not in existing_ids:
+        clean_books.append(api_book)  # Only add if not in DB
+```
+
+### Pagination Considerations
+
+**Database Pagination** (slice-based):
+```python
+start = (page - 1) * page_size
+end = page * page_size
+db_books = Book.objects.filter(...)[start:end]  # Django QuerySet slicing
+```
+
+**Open Library Pagination**:
+- Uses `page` parameter directly
+- Doesn't align with local DB pagination
+- That's why local results "fill first" — reduces API calls
+
+**Problem**: Page numbers may not be consistent across databases:
+- User asks for page 2 of "Harry Potter"
+- DB has 8 results total (2 pages)
+- API has 1000+ results (100+ pages)
+- Page 2 in DB ≠ Page 2 in API
+
+**Solution**: Always query DB first, only call API for "missing" results on a given page.
+
+### Performance Notes
+
+**Best Case** (DB has 10+ results)
+- 1 database query
+- 0 API calls
+- Response time: ~50ms
+
+**Worst Case** (DB has 0 results)
+- 1 database query (returns empty)
+- 1 API call
+- Data parsing + deduplication
+- Response time: ~500ms (API dependent)
+
+**Optimization Opportunities**:
+- Cache popular searches in Redis
+- Pre-cache top 100 books from Open Library
+- Add search indexing (e.g., full-text search in DB)
+- Rate limit API calls to avoid slow external requests
+
+---
+
 ## Serializer patterns for ManyToMany fields
 
 When exposing `Favourite_genres` via API, use a DRF serializer:
@@ -786,3 +1068,4 @@ user.set_password(password)  # PBKDF2-SHA256
 
 Both use **PBKDF2-SHA256**, so they're compatible.
 
+**what is a KeyError**
