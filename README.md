@@ -106,10 +106,16 @@ Base URL: `http://localhost:8000/api/books/`
 
 ### 1. Search Books
 - `GET /api/books/search/`
-- Query Parameters:
+- Query Parameters (pass in URL, not as JSON body):
   - `q` (string, required): Search query (book title)
   - `page` (integer, required): Page number (starts at 1)
   - `page_size` (integer, optional, default: 10): Results per page
+
+**Testing**: Since this is a GET request, parameters go directly in the URL query string:
+```
+GET http://localhost:8000/api/books/search/?q=harry+potter&page=1&page_size=10
+```
+**NOT** as raw JSON in the request body.
 
 Response:
 - `200 OK` on success with paginated results
