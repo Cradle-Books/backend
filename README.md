@@ -141,6 +141,33 @@ Sample Response:
 }
 ```
 
+### 2. Add Book to Library
+- `POST /api/books/library/`
+- Auth Required: ✅ Yes (Bearer token)
+- Body (JSON):
+  - `book` (integer, required): Book ID from search results
+  - `status` (string, required): One of `none`, `want`, `reading`, `finished`
+  - `ratings` (integer, optional): 1-5 star rating
+  - `review` (string, optional): User's written review
+
+Response:
+- `201 Created` on success with book added to library
+- `400 Bad Request` if book already in library or invalid data
+- `401 Unauthorized` if not authenticated
+
+Example:
+```json
+{
+  "message": "Book added to library successfully",
+  "data": {
+    "book": 1,
+    "status": "want",
+    "ratings": null,
+    "review": null
+  }
+}
+```
+
 ## Book Model Info
 
 ### Book Model

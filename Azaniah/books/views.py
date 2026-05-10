@@ -147,4 +147,18 @@ class SearchBookView(APIView):
             "results": combined
         })
 
-        
+
+class AddToLibraryView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = UserBookSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            user_book = serializer.save()
+            return Response({
+                "message": "Book added to library successfully",
+                "data": UserBookSerializer(user_book, context={'request': request}).data
+            }, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

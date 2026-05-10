@@ -1173,3 +1173,132 @@ fetch('/api/books/search/?q=harry%20potter&page=1&page_size=15')
 - Display cover images with fallback for missing URLs
 
 ---
+
+#### 2. ADD BOOK TO LIBRARY
+
+**Endpoint**: `POST /books/library/`  
+**Auth Required**: ✅ Yes (Bearer token required)  
+**Purpose**: Add a book to the authenticated user's reading library with status tracking
+
+**Request Headers**:
+```
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**:
+```json
+{
+  "book": 5,
+  "status": "want",
+  "ratings": null,
+  "review": null
+}
+```
+
+**Request Body Fields**:
+- `book` (integer, required): Book ID to add (get from search results)
+- `status` (string, required): One of `none`, `want`, `reading`, `finished`
+  - `none` - Default/no status
+  - `want` - Want to read
+  - `reading` - Currently reading
+  - `finished` - Already finished
+- `ratings` (integer, optional): 1-5 star rating (null if not rated yet)
+- `review` (string, optional): User's written review (can be empty)
+
+**Response (201 CREATED)**:
+```json
+{
+  "message": "Book added to library successfully",
+  "data": {
+    "book": 5,
+    "status": "want",
+    "ratings": null,
+    "review": null
+  }
+}
+```
+
+**Possible Errors**:
+```json
+// Book already in user's library
+{
+  "book": [
+    "Book already exists in your library."
+  ]
+}
+
+// Invalid book ID
+{
+  "book": [
+    "Invalid pk \"999\" - object does not exist."
+  ]
+}
+
+// Invalid status choice
+{
+  "status": [
+    "\"invalid\" is not a valid choice. Expected one of: 'none', 'want', 'reading', 'finished'."
+  ]
+}
+
+// Not authenticated
+{
+  "detail": "Authentication credentials were not provided."
+}
+
+// Invalid token
+{
+  "detail": "Given token not valid for any token type"
+}
+```
+
+**Validation Rules**:
+1. User must be authenticated (has valid JWT token)
+2. Book must exist in database
+3. User can only have ONE entry per book (enforced via `unique_together` constraint)
+4. Status must be one of the choices above
+
+**What This Creates**:
+- New `UserBook` entry linking the user to the book
+- Tracks user's reading status
+- Allows storing ratings and reviews later
+- Can be updated later via PATCH to change status/ratings
+
+**Use Cases**:
+- User finds book via search, clicks "Add to library" → creates with `status="want"`
+- User starts reading → PATCH to change status to `status="reading"`
+- User finishes book → PATCH to `status="finished"` and add ratings/review
+
+**Frontend Integration**:
+```javascript
+// User clicks "Add to Library" after finding a book
+const bookId = 5;  // From search results
+const accessToken = 'eyJ0eXAiOiJKV1QiLCJhbGc...';
+
+fetch('/api/books/library/', {
+    method: 'POST',
+    headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+        book: bookId,
+        status: 'want',
+        ratings: null,
+        review: null
+    })
+})
+.then(res => res.json())
+.then(data => {
+    if (res.ok) {
+        console.log('Book added successfully!');
+        // Update UI (disable button, show feedback)
+    } else {
+        console.log('Error:', data);
+        // Show error message
+    }
+})
+```
+
+---

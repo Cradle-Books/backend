@@ -10,6 +10,7 @@
 7. [Password Reset Flow](#password-reset-flow)
 8. [Gmail API Token Refresh](#gmail-api-token)
 9. [Dual Password Hashing](#dual-password-hashing)
+10. [DRF APIView: Class-Level vs Method-Level Configuration](#drf-auth-config)
 
 ---
 
@@ -1068,4 +1069,339 @@ user.set_password(password)  # PBKDF2-SHA256
 
 Both use **PBKDF2-SHA256**, so they're compatible.
 
-**what is a KeyError**
+---
+
+## DRF APIView: Class-Level vs Method-Level Configuration {#drf-auth-config}
+
+### The Problem
+
+When protecting DRF APIView endpoints with authentication, you must set `authentication_classes` and `permission_classes` at the **class level**, NOT inside methods.
+
+### ❌ WRONG (Inside Method)
+
+```python
+class AddToLibraryView(APIView):
+    def post(self, request):
+        # ❌ WRONG - DRF doesn't see these here
+        authentication_classes = [JWTAuthentication]
+        permission_classes = [IsAuthenticated]
+        
+        if not request.user.is_authenticated:
+            return Response({"error": "Unauthorized"}, status=401)
+        
+        # Rest of logic...
+```
+
+**Why it fails**:
+- DRF processes authentication/permissions BEFORE calling the method
+- By the time the method runs, DRF has already decided the user is unauthenticated
+- Setting them inside the method is too late
+- Result: **Always get 401 Unauthorized** even with valid token
+
+### ✅ CORRECT (Class Level)
+
+```python
+class AddToLibraryView(APIView):
+    # ✅ CORRECT - DRF sees these before method is called
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        serializer = UserBookSerializer(data=request.data)
+        if serializer.is_valid():
+            user_book = serializer.save(user=request.user)
+            return Response(data, status=201)
+        return Response(serializer.errors, status=400)
+```
+
+**Why it works**:
+- DRF's request processing pipeline runs BEFORE the method
+- Sees `authentication_classes` at class level → applies JWT auth
+- Sees `permission_classes` at class level → validates user is authenticated
+- If all checks pass, `request.user` is populated and method is called
+- Result: **User is properly authenticated**
+
+### DRF Request Processing Order
+
+```
+1. Request arrives
+   ↓
+2. DRF checks class-level authentication_classes
+   └─ Looks for Authorization header
+   └─ Validates JWT token
+   └─ Populates request.user
+   ↓
+3. DRF checks class-level permission_classes
+   └─ Verifies request.user satisfies permissions
+   └─ If not, returns 403 Forbidden
+   ↓
+4. Method (get/post/put/etc) is called
+   └─ By this point, authentication already done
+   └─ request.user is available
+```
+
+### Common Pitfalls
+
+**Pitfall 1: Checking Authentication in Method**
+```python
+# ❌ Unnecessary and won't help if classes are misconfigured
+if not request.user.is_authenticated:
+    return Response({"error": "..."}, status=401)
+
+# ✅ Trust the class-level permission_classes instead
+# The permission system already enforced this
+```
+
+**Pitfall 2: Setting Classes in __init__**
+```python
+class MyView(APIView):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # ❌ Still wrong - too late, after class is instantiated
+        self.authentication_classes = [JWTAuthentication]
+        self.permission_classes = [IsAuthenticated]
+```
+
+**Pitfall 3: Forgetting to Use request.user in Serializer.save()**
+```python
+# ❌ Missing the actual user
+user_book = serializer.save()  # user=None in many cases
+
+# ✅ Pass the authenticated user
+user_book = serializer.save(user=request.user)
+```
+
+### Template for Protected Endpoints
+
+```python
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework import status
+
+class ProtectedView(APIView):
+    # 1. ALWAYS at class level
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        # 2. request.user is guaranteed to exist here
+        # 3. It's only called if authentication passed
+        
+        serializer = MySerializer(data=request.data)
+        if serializer.is_valid():
+            obj = serializer.save(user=request.user)
+            return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+```
+
+### Testing Protected Endpoints
+
+**In Postman**:
+1. Send request to endpoint
+2. Go to **Authorization** tab
+3. Select **Bearer Token** or create with `token {{access_token}}`
+4. Paste your JWT access token
+5. Postman automatically adds `Authorization: Bearer <token>` header
+6. Send request
+
+**In curl**:
+```bash
+curl -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc..." \
+     http://localhost:8000/api/library/
+```
+
+**In JavaScript/Fetch**:
+```javascript
+fetch('/api/library/', {
+    method: 'POST',
+    headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(data)
+})
+```
+
+### Summary
+
+| Aspect | Class Level | Method Level |
+|--------|-------------|--------------|
+| **Seen by DRF** | ✅ Yes | ❌ No |
+| **Applied before method** | ✅ Yes | ❌ No |
+| **request.user populated** | ✅ Yes | ❌ No |
+| **Works** | ✅ Yes | ❌ No |
+
+**Key Takeaway**: Always define `authentication_classes` and `permission_classes` as **class attributes**, not in methods.
+
+---
+
+## Serializer Context: When and Why You Need It {#serializer-context}
+
+### What is Context?
+
+**Context** is a dictionary passed to a serializer that provides additional information beyond the request data. The most important is `request`, which gives the serializer access to the authenticated user.
+
+```python
+# Without context
+serializer = UserBookSerializer(data=request.data)
+# serializer.context = {} (empty)
+
+# With context
+serializer = UserBookSerializer(data=request.data, context={'request': request})
+# serializer.context = {'request': <Request object>}
+```
+
+### When You DON'T Need Context
+
+**Generic serializers that don't care about the current user:**
+
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['Email', 'First_name', 'Last_name', 'Password']
+    
+    def create(self, validated_data):
+        # Just creates account with provided data
+        # Doesn't validate ownership or check user permissions
+        account = Account.objects.create(**validated_data)
+        return account
+
+# Usage - no context needed:
+serializer = AccountSerializer(data=request.data)
+```
+
+**Why it works**: The serializer only creates data based on what's in the request body. It doesn't need to know WHO is creating it.
+
+### When You DO Need Context
+
+**Serializers that validate based on the current user:**
+
+```python
+class UserBookSerializer(serializers.ModelSerializer):
+    def validate_book(self, value):
+        # ❌ This will crash without context:
+        request = self.context.get("request")  # Returns None if no context!
+        user = request.user  # ❌ None.user → AttributeError
+        
+        # Check: Does THIS USER already have THIS BOOK?
+        if UserBook.objects.filter(user=user, book=value).exists():
+            raise serializers.ValidationError(
+                "Book already exists in your library."
+            )
+        return value
+    
+    def create(self, validated_data):
+        # ❌ Also needs context to get the user:
+        request = self.context.get("request")
+        user = request.user
+        
+        # Create entry linked to the current user
+        user_book = UserBook.objects.create(
+            user=user,
+            **validated_data
+        )
+        return user_book
+
+# Usage - MUST pass context:
+serializer = UserBookSerializer(
+    data=request.data, 
+    context={'request': request}  # ✅ Pass it!
+)
+```
+
+**Why it's needed**: The serializer validates **ownership** - it needs to know "does the current user already have this book?" This requires access to `request.user`.
+
+### The Error Without Context
+
+```python
+# View creates serializer WITHOUT context
+serializer = UserBookSerializer(data=request.data)  # ❌ Mistake
+
+# Serializer tries to validate
+if serializer.is_valid():  # Calls validate_book()
+    # In validate_book():
+    request = self.context.get("request")  # Returns None
+    user = request.user  # ❌ AttributeError: 'NoneType' object has no attribute 'user'
+```
+
+### Comparison Table
+
+| Scenario | Serializer Example | Needs Context? | Why? |
+|----------|---|---|---|
+| Create generic data | AccountSerializer | ❌ No | Doesn't care who creates it |
+| Create user-specific data | UserBookSerializer | ✅ Yes | Needs to link to current user |
+| Validate ownership | `validate_book()` checks if user has book | ✅ Yes | Must check current user's books |
+| Validate permissions | "Only author can edit" | ✅ Yes | Must check who owns it |
+| Build absolute URLs | `HyperlinkedRelatedField` | ✅ Yes | Needs request to build URL |
+| Audit logging | "Log who created this" | ✅ Yes | Must record current user |
+
+### Best Practice: Always Pass Context When User-Specific
+
+Even if your current serializer doesn't use context, if it MIGHT become user-specific later, pass it:
+
+```python
+# ✅ Safe - always works
+serializer = UserBookSerializer(
+    data=request.data,
+    context={'request': request}
+)
+
+# ❌ Fragile - breaks if you add user checks later
+serializer = UserBookSerializer(data=request.data)
+```
+
+### Pattern: User-Specific Serializers
+
+Any time you're working with data that belongs to a user, follow this pattern:
+
+```python
+class UserSpecificSerializer(serializers.ModelSerializer):
+    """Any serializer that validates based on current user"""
+    
+    class Meta:
+        model = UserModel
+        fields = [...]
+    
+    def validate_something(self, value):
+        # ✅ Get request from context
+        request = self.context.get("request")
+        if not request:
+            raise serializers.ValidationError("Request context missing")
+        
+        user = request.user
+        # Now you can validate user ownership
+        return value
+    
+    def create(self, validated_data):
+        # ✅ Get user from context
+        request = self.context.get("request")
+        user = request.user
+        
+        # Create linked to user
+        return UserModel.objects.create(user=user, **validated_data)
+
+# ✅ In view: Always pass context
+class UserSpecificView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        serializer = UserSpecificSerializer(
+            data=request.data,
+            context={'request': request}  # ← Always
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(...)
+        return Response(serializer.errors, status=400)
+```
+
+### Summary
+
+- **Generic serializers** (no user logic): Can skip context
+- **User-specific serializers** (check ownership, permissions, audit): MUST pass `context={'request': request}`
+- **Rule of thumb**: If your `validate_*()` or `create()` method accesses `request.user`, you NEED context
+- **Safe default**: Always pass context, it doesn't hurt
