@@ -27,7 +27,8 @@ class UserBook(models.Model):
     user = models.ForeignKey( 
         settings.AUTH_USER_MODEL,
         on_delete = models.CASCADE
-    ) 
+    )#used to link the book to the user and also to know which user has which book in their library. on_delete = models.CASCADE means that if the user is deleted, all their associated UserBook entries will also be deleted. 
+
     book = models.ForeignKey(
         Book,
         on_delete = models.CASCADE,

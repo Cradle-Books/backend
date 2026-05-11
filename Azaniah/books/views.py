@@ -153,12 +153,61 @@ class AddToLibraryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = UserBookSerializer(data=request.data, context={'request': request})
+        serializer = UserBookSerializer(data=request.data, context={'request': request}) #context is needed for the serializer in order to relate the existence of the user to the book being added to the library. This allows us to check if the book already exists in the user's library and to associate the new UserBook entry with the correct user when saving it to the database.
+
         if serializer.is_valid():
+            #if book doesn't exist user's library, and user to book relationship is valid and doesn't exist, then the book is added to the user's library.
             user_book = serializer.save()
+
             return Response({
                 "message": "Book added to library successfully",
-                "data": UserBookSerializer(user_book, context={'request': request}).data
+                "data": UserBookSerializer(user_book, context={'request': request}).data #can also just be written as serializer.data
             }, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class FetchLibraryView(APIView):
+    #authentication and permission classes are meant to be directly nested in the class function.
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user_books = UserBook.objects.filter(
+            user = request.user
+        ).order_by("-created_at")
+
+        serializer = UserBookSerializer(user_books, many = True) #many = True because user_books is a queryset that can contain multiple UserBook instances, and we want to serialize all of them into a list of dictionaries. If we set many = False, the serializer would expect a single UserBook instance and would raise an error when it receives a queryset instead.
+
+        return Response({
+            "message": "Library fetched successfully",
+            "amount": user_books.count(),
+            "books": serializer.data 
+        }, status = status.HTTP_200_OK)
+
+class UpdateLibraryView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, userbook_id): #patch allows us to update only specific fields of the UserBook instance, rather than requiring all fields to be provided as in a PUT request. This is useful for updating the reading status or rating without needing to resend all the book information.
+        #where userbook_id is the id of the unique user to book relationship
+
+        try:
+            #this fetches userbook object that matches the provided userbook_id that we want to update.
+            user_book = UserBook.objects.get(id=userbook_id, user=request.user)
+
+        except UserBook.DoesNotExist:
+            #checks if the user to book relationship exists.
+            return Response({
+                "message": "Book not found in your library"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = UserBookSerializer(user_book, data=request.data, partial=True, context={'request': request})
+
+        if serializer.is_valid():
+            updated_book = serializer.save()
+            return Response({
+                "message": "Book updated successfully",
+                "data": UserBookSerializer(updated_book, context={'request': request}).data
+            }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

@@ -10,7 +10,8 @@ class UserBookSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserBook
-        fields = ['book', 'status', 'ratings', 'review']
+        fields = ['id', 'book', 'status', 'ratings', 'review', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
     def validate_book(self, value):
         request = self.context.get("request")
