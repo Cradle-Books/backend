@@ -189,7 +189,7 @@ class UpdateLibraryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, userbook_id): #patch allows us to update only specific fields of the UserBook instance, rather than requiring all fields to be provided as in a PUT request. This is useful for updating the reading status or rating without needing to resend all the book information.
-        #where userbook_id is the id of the unique user to book relationship
+        #where userbook_id is the id of the unique user to book relationship.
 
         try:
             #this fetches userbook object that matches the provided userbook_id that we want to update.
@@ -211,3 +211,23 @@ class UpdateLibraryView(APIView):
             }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class DeleteUserBookView(APIView):
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, userbook_id):
+        try:
+            user_book = UserBook.objects.get(id=userbook_id, user=request.user) #fetches unique user - book relationship using userbook_id.
+
+        except UserBook.DoesNotExist:
+            return Response({
+                "message": "Book not found in your library"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        user_book.delete() #deletes unique user - book relationship from library.
+
+        return Response({
+            "message": "Book removed from library successfully"
+        }, status=status.HTTP_204_NO_CONTENT)
