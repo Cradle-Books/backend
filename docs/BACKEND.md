@@ -1,8 +1,29 @@
 # Azaniah Backend API Documentation
 
-**Version**: 1.1  
-**Last Updated**: April 11, 2026  
+**Version**: 1.5  
+**Last Updated**: May 13, 2026  
 **For**: Backend Developers & Frontend Developers
+
+---
+
+## Recent Major Updates (v1.5)
+
+### 📚 Book Search Architecture Overhaul
+- **Dual-API Integration**: Implemented Google Books API as fallback enrichment source
+- **Smart Metadata Enrichment**: Automatically enriches Open Library results with missing genres and cover images from Google Books
+- **Null-Safe Cover Field**: `cover` now supports NULL values for books without images
+
+### 🔧 Database Model Changes
+- **Book.cover**: Changed to `URLField(blank=True, null=True)` - now nullable
+- **Book.google_books_id**: Removed `unique=True` constraint - allows duplicate IDs from different sources
+- **Book.description**: Expanded field size from 15,000 to 250,000 characters
+- **Book.external_id**: Now primary deduplication key (Open Library key) instead of google_books_id
+
+### 🛠️ Code Improvements
+- Added `fetch_google_book(title, author)` - Google Books enrichment function
+- Added `fetch_google_books_details(title, author)` - Alternative details-only function
+- Fixed BookSerializer: changed field name from `'image'` to `'cover'`
+- Implemented conditional enrichment in SearchBookView
 
 ---
 
@@ -14,6 +35,7 @@
    - [Authentication Endpoints](#authentication-endpoints)
    - [Password Reset Endpoints](#password-reset-endpoints)
    - [Profile Endpoints](#profile-endpoints)
+   - [Books API Endpoints](#books-api)
 4. [Error Handling](#error-handling)
 5. [Common Patterns](#common-patterns)
 6. [Database Models](#database-models)
@@ -840,6 +862,50 @@ Authorization: Bearer <access_token>
 4. Redirect to login screen
 ```
 
+### Pattern 8: Service Functions Architecture (Dictionary Return)
+
+**Philosophy**: Service functions (`services/*.py`) return raw dictionaries, not `Response` objects. Views handle HTTP response creation.
+
+**Why this pattern?**
+- **Separation of Concerns**: Service layer handles business logic, view layer handles HTTP
+- **Reusability**: Service functions can be called from different views, tasks, or migrations
+- **Testability**: Easier to test pure dictionary returns than Response objects
+
+**Example from `search_books()`**:
+
+```python
+# ❌ BAD: Service returns Response
+def search_books(query, page, page_size):
+    return Response({"source": "db", "results": results})
+
+# ✅ GOOD: Service returns dictionary
+def search_books(query, page, page_size):
+    return {"source": "db", "results": results}
+```
+
+**View Usage Pattern**:
+
+```python
+class SearchBookView(APIView):
+    def get(self, request):
+        # Call service function (returns dict)
+        result = search_books(query, page, page_size)
+        
+        # View checks for errors and handles HTTP response
+        if "error" in result:
+            return Response({"message": result["error"]}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        
+        # View wraps service output in Response
+        return Response({
+            "source": result["source"],#searches the function for a dictionary field of the name "source"
+            "page": page,
+            "page_size": page_size,
+            "results": result["results"]#searches the function for a dictionary field of the name "results"
+        })
+```
+
+**Key Rule**: If a service function needs to signal an error, use `{"error": "message"}` and let the view handle the HTTP status code.
+
 ---
 
 ## Database Models {#database-models}
@@ -1299,6 +1365,518 @@ fetch('/api/books/library/', {
         // Show error message
     }
 })
+```
+
+---
+
+#### 3. FETCH LIBRARY
+
+**Endpoint**: `GET /books/library/fetch/`  
+**Auth Required**: ✅ Yes (Bearer token required)  
+**Purpose**: Retrieve all books in the authenticated user's reading library
+
+**Request Headers**:
+```
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body**: None (this is a GET request)
+
+**Response (200 OK)**:
+```json
+{
+  "message": "Library fetched successfully",
+  "amount": 3,
+  "books": [
+    {
+      "id": 1,
+      "book": 5,
+      "title": "The Hobbit",
+      "author": "J.R.R. Tolkien",
+      "cover": "https://example.com/cover.jpg",
+      "release_date": 1937,
+      "genre": ["fantasy", "adventure"],
+      "status": "want",
+      "ratings": null,
+      "review": null,
+      "created_at": "2026-04-15T10:30:00Z",
+      "updated_at": "2026-04-15T10:30:00Z"
+    },
+    {
+      "id": 2,
+      "book": 12,
+      "title": "Harry Potter and the Philosopher's Stone",
+      "author": "J.K. Rowling",
+      "cover": "https://example.com/hp.jpg",
+      "release_date": 1997,
+      "genre": ["fantasy", "magic"],
+      "status": "reading",
+      "ratings": null,
+      "review": null,
+      "created_at": "2026-04-10T14:20:00Z",
+      "updated_at": "2026-04-12T09:15:00Z"
+    },
+    {
+      "id": 3,
+      "book": 18,
+      "title": "1984",
+      "author": "George Orwell",
+      "cover": "https://example.com/1984.jpg",
+      "release_date": 1949,
+      "genre": ["dystopian", "political-fiction"],
+      "status": "finished",
+      "ratings": 5,
+      "review": "A masterpiece of dystopian fiction.",
+      "created_at": "2026-03-25T08:45:00Z",
+      "updated_at": "2026-04-01T16:22:00Z"
+    }
+  ]
+}
+```
+
+**Response Fields Explained**:
+- `message`: Success status message
+- `amount`: Total number of books in user's library
+- `books`: Array of user book objects containing:
+  - `id`: UserBook entry ID (primary key)
+  - `book`: Book ID (foreign key to Book model)
+  - `title`, `author`, `cover`, `release_date`, `genre`: Book details (from Book model)
+  - `status`: Reading status (`none`, `want`, `reading`, `finished`)
+  - `ratings`: 1-5 star rating (null if not rated)
+  - `review`: User's written review (can be empty)
+  - `created_at`: Timestamp when book was added to library
+  - `updated_at`: Timestamp of last modification
+
+**Ordering**: Books are returned in **reverse chronological order** by `created_at` (most recently added first)
+
+**Possible Errors**:
+```json
+// Not authenticated
+{
+  "detail": "Authentication credentials were not provided."
+}
+
+// Invalid token
+{
+  "detail": "Given token not valid for any token type"
+}
+
+// Expired token
+{
+  "detail": "Token is invalid or expired"
+}
+```
+
+**Validation Rules**:
+1. User must be authenticated (has valid JWT token)
+2. Only returns books belonging to the authenticated user
+3. No parameters required
+
+**What This Returns**:
+- Complete user's personal reading library
+- All associated metadata (status, ratings, reviews)
+- Timestamps for tracking changes
+
+**Use Cases**:
+- Load "My Library" page with all user books
+- Display reading status for each book (want to read, reading, finished)
+- Show user ratings and reviews
+- Sync library data between devices
+- Generate reading statistics
+
+**Frontend Integration**:
+```javascript
+// Fetch user's library on page load
+const accessToken = 'eyJ0eXAiOiJKV1QiLCJhbGc...';
+
+fetch('/api/books/library/fetch/', {
+    method: 'GET',
+    headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+    }
+})
+.then(res => res.json())
+.then(data => {
+    console.log(`Found ${data.amount} books in library`);
+    data.books.forEach(userBook => {
+        console.log(`${userBook.title} - Status: ${userBook.status}`);
+        // Render each book in the UI
+    });
+})
+.catch(err => {
+    console.error('Error fetching library:', err);
+    // Show error message
+})
+```
+
+**Example Display Logic**:
+```javascript
+// Separate books by reading status
+const wantToRead = data.books.filter(b => b.status === 'want');
+const currentlyReading = data.books.filter(b => b.status === 'reading');
+const finished = data.books.filter(b => b.status === 'finished');
+
+// Display in tabs or sections
+showSection('Want to Read', wantToRead);
+showSection('Currently Reading', currentlyReading);
+showSection('Finished', finished);
+```
+
+---
+
+#### 4. UPDATE LIBRARY ENTRY
+
+**Endpoint**: `PATCH /books/library/update/<int:userbook_id>/`  
+**Auth Required**: ✅ Yes (Bearer token required)  
+**Purpose**: Update a book's reading status, rating, or review in the authenticated user's library
+
+**Request Headers**:
+```
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**URL Parameters**:
+- `userbook_id` (integer, required): The ID of the UserBook entry to update (get from fetch library response)
+
+**Request Body** (all fields optional - send only what you want to update):
+```json
+{
+  "status": "reading",
+  "ratings": 4,
+  "review": "Great book! Couldn't put it down."
+}
+```
+
+**Request Body Fields**:
+- `status` (string, optional): One of `none`, `want`, `reading`, `finished`
+  - `none` - Default/no status
+  - `want` - Want to read
+  - `reading` - Currently reading
+  - `finished` - Already finished
+- `ratings` (integer, optional): 1-5 star rating (can be null)
+- `review` (string, optional): User's written review (can be empty or null)
+
+**Response (200 OK)**:
+```json
+{
+  "message": "Book updated successfully",
+  "data": {
+    "id": 5,
+    "book": 12,
+    "title": "Harry Potter and the Philosopher's Stone",
+    "author": "J.K. Rowling",
+    "cover": "https://example.com/hp.jpg",
+    "release_date": 1997,
+    "genre": ["fantasy", "magic"],
+    "status": "reading",
+    "ratings": 4,
+    "review": "Great book! Couldn't put it down.",
+    "created_at": "2026-04-10T14:20:00Z",
+    "updated_at": "2026-05-11T16:45:00Z"
+  }
+}
+```
+
+**Response Fields Explained**:
+- Includes all UserBook data with updated fields
+- `updated_at` timestamp reflects the latest modification
+- All book metadata is included for frontend display
+
+**Possible Errors**:
+```json
+// Book not found in user's library
+{
+  "message": "Book not found in your library"
+}
+
+// Invalid status choice
+{
+  "status": [
+    "\"invalid_status\" is not a valid choice. Expected one of: 'none', 'want', 'reading', 'finished'."
+  ]
+}
+
+// Invalid rating value
+{
+  "ratings": [
+    "Ensure this value is less than or equal to 5."
+  ]
+}
+
+// Not authenticated
+{
+  "detail": "Authentication credentials were not provided."
+}
+
+// Invalid token
+{
+  "detail": "Given token not valid for any token type"
+}
+```
+
+**HTTP Status Codes**:
+- `200 OK`: Book updated successfully
+- `400 Bad Request`: Invalid data provided
+- `404 Not Found`: UserBook entry doesn't exist or doesn't belong to user
+- `401 Unauthorized`: Missing or invalid authentication token
+
+**Validation Rules**:
+1. User must be authenticated (has valid JWT token)
+2. UserBook must exist and belong to the authenticated user
+3. Status must be one of the valid choices (if provided)
+4. Rating must be between 1-5 (if provided)
+5. Only the provided fields are updated (partial update via PATCH)
+
+**What This Updates**:
+- Modifies the `UserBook` entry for the specified book
+- Updates only the fields provided in the request body
+- Automatically updates the `updated_at` timestamp
+- Book information itself remains unchanged (only user's metadata is updated)
+
+**Use Cases**:
+- User starts reading → PATCH with `status="reading"`
+- User finishes book → PATCH with `status="finished"` and add `ratings` + `review`
+- User wants to rate book → PATCH with just `ratings` value
+- User changes mind about a book → PATCH with `status="none"`
+- User updates their review → PATCH with new `review` text
+
+**Frontend Integration**:
+```javascript
+// Example 1: Update reading status when user starts reading
+const userBookId = 5;  // From fetch library response
+const accessToken = 'eyJ0eXAiOiJKV1QiLCJhbGc...';
+
+fetch(`/api/books/library/update/${userBookId}/`, {
+    method: 'PATCH',
+    headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+        status: 'reading'
+    })
+})
+.then(res => res.json())
+.then(data => {
+    if (res.ok) {
+        console.log('Status updated to reading!');
+        updateUI(data.data);
+    } else {
+        console.log('Error:', data);
+    }
+})
+```
+
+```javascript
+// Example 2: Add rating and review after finishing book
+const userBookId = 5;
+const accessToken = 'eyJ0eXAiOiJKV1QiLCJhbGc...';
+
+fetch(`/api/books/library/update/${userBookId}/`, {
+    method: 'PATCH',
+    headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+        status: 'finished',
+        ratings: 5,
+        review: 'An absolute masterpiece! Must read for everyone.'
+    })
+})
+.then(res => res.json())
+.then(data => {
+    if (res.ok) {
+        console.log('Book marked as finished with rating!');
+        updateUI(data.data);
+    }
+})
+```
+
+**Advanced: Update Only Specific Fields**:
+```javascript
+// Update only the review without changing status or rating
+fetch(`/api/books/library/update/${userBookId}/`, {
+    method: 'PATCH',
+    headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+        review: 'Updated review after thinking about it more.'
+    })
+})
+```
+
+---
+
+#### 5. DELETE LIBRARY ENTRY
+
+**Endpoint**: `DELETE /books/library/delete/<int:userbook_id>/`  
+**Auth Required**: ✅ Yes (Bearer token required)  
+**Purpose**: Remove a book from the authenticated user's personal reading library
+
+**Request Headers**:
+```
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**URL Parameters**:
+- `userbook_id` (integer, required): The ID of the UserBook entry to delete (get from fetch library response)
+
+**Request Body**: None (this is a DELETE request)
+
+**Response (204 NO CONTENT)**:
+```
+HTTP/1.1 204 No Content
+
+{
+  "message": "Book removed from library successfully"
+}
+```
+
+**Response Details**:
+- HTTP Status: `204 No Content` — Standard REST convention for successful deletion
+- Minimal response body (just a success message)
+- No book data returned (it has been deleted)
+
+**Possible Errors**:
+```json
+// Book not found in user's library (or already deleted)
+{
+  "message": "Book not found in your library"
+}
+
+// Not authenticated
+{
+  "detail": "Authentication credentials were not provided."
+}
+
+// Invalid token
+{
+  "detail": "Given token not valid for any token type"
+}
+```
+
+**HTTP Status Codes**:
+- `204 No Content`: Book successfully removed from library
+- `404 Not Found`: UserBook entry doesn't exist or doesn't belong to user
+- `401 Unauthorized`: Missing or invalid authentication token
+
+**Validation Rules**:
+1. User must be authenticated (has valid JWT token)
+2. UserBook must exist and belong to the authenticated user
+3. The entire UserBook entry is deleted (cannot be partially deleted)
+
+**What This Does**:
+- Deletes the `UserBook` entry from the database
+- Completely removes the user-book relationship
+- Book itself remains in the Book database (can be re-added later)
+- All user's data about the book (status, ratings, review) is permanently deleted
+
+**Important**: This action is permanent. Once a book is removed from the library, all associated metadata (reading status, ratings, and reviews) are lost.
+
+**Use Cases**:
+- User accidentally added a book → Remove it from library
+- User regrets adding a book → Delete it
+- User wants to clean up their library → Remove unwanted entries
+- User changes mind about reading a book → Delete from library
+
+**Frontend Integration**:
+```javascript
+// Example 1: Remove book from library with confirmation
+const userBookId = 5;  // From fetch library response
+const accessToken = 'eyJ0eXAiOiJKV1QiLCJhbGc...';
+
+// First, show confirmation dialog
+if (confirm('Are you sure you want to remove this book from your library?')) {
+    fetch(`/api/books/library/delete/${userBookId}/`, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(res => {
+        if (res.ok || res.status === 204) {
+            console.log('Book removed successfully!');
+            // Remove book from UI
+            removeBookFromUI(userBookId);
+        } else {
+            return res.json().then(data => {
+                console.log('Error:', data.message);
+                alert('Error: ' + data.message);
+            });
+        }
+    })
+    .catch(err => {
+        console.error('Error removing book:', err);
+        alert('Failed to remove book');
+    })
+}
+```
+
+```javascript
+// Example 2: Remove book silently (no confirmation for quick delete buttons)
+async function removeBookFromLibrary(userBookId, accessToken) {
+    try {
+        const response = await fetch(`/api/books/library/delete/${userBookId}/`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok || response.status === 204) {
+            console.log('Book removed successfully');
+            return { success: true };
+        } else if (response.status === 404) {
+            console.log('Book not found in library');
+            return { success: false, error: 'Book not found' };
+        } else {
+            const data = await response.json();
+            return { success: false, error: data.message };
+        }
+    } catch (err) {
+        console.error('Error:', err);
+        return { success: false, error: 'Network error' };
+    }
+}
+
+// Usage
+const result = await removeBookFromLibrary(5, accessToken);
+if (result.success) {
+    // Update UI
+    updateLibraryUI();
+} else {
+    alert(`Failed: ${result.error}`);
+}
+```
+
+```javascript
+// Example 3: Batch delete multiple books
+async function removeMultipleBooksFromLibrary(userBookIds, accessToken) {
+    const results = await Promise.all(
+        userBookIds.map(id =>
+            fetch(`/api/books/library/delete/${id}/`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+        )
+    );
+
+    const successCount = results.filter(r => r.ok || r.status === 204).length;
+    console.log(`Successfully deleted ${successCount} out of ${userBookIds.length} books`);
+    return successCount === userBookIds.length;
+}
 ```
 
 ---

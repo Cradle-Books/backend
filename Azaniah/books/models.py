@@ -7,14 +7,16 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 class Book(models.Model):
     title = models.CharField(max_length = 300)
     author = models.CharField(max_length = 150)
+    google_books_id = models.CharField(max_length = 250, null = True, blank = True)
     release_date = models.IntegerField(null = True, blank = True)
     genre = models.JSONField(default = list, blank = True)
-    cover = models.URLField(blank = True)
-    description = models.CharField(max_length = 15000)
+    cover = models.URLField(blank = True, null = True)
+    description = models.CharField(max_length = 250000)
+    page_count = models.IntegerField(null = True, blank = True)
     external_id = models.CharField(max_length = 100, unique = True)
 
     def __str__(self):
-        return self.title
+        return f"{self.title} - {self.author}"
 
 
 class UserBook(models.Model):

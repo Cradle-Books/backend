@@ -1,5 +1,4 @@
 from django.shortcuts import render
-from django.db.models import Q
 from rest_framework.views import APIView
 from rest_framework import status
 from .serializers import BookSerializer, UserBookSerializer
@@ -9,9 +8,30 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 import logging
 import requests
 from .models import Book, UserBook
+from django.conf import settings
+from .services.search_books import search_books
+from .services.book_detail import get_book_detail
+from .services.userbook_profile import get_userbook_profile
+from .services.trending_books import get_trending_books
+from .services.recommendations import get_recommendations
 
 # Create your views here.
+
 class SearchBookView(APIView):
+    """
+    Book search endpoint combining database and Open Library API results.
+    
+    Architecture Pattern (see docs/BACKEND.md - Pattern 8):
+    - search_books() service returns a dictionary, NOT a Response object
+    - View handles all HTTP response creation and error handling
+    - This allows service functions to be reused across different contexts
+    
+    Example service returns:
+    - Success: {"source": "db|mixed", "results": [...]}
+    - Error: {"error": "message"}
+    
+    View's responsibility: wrap service output + handle HTTP status codes
+    """
 
     permission_classes = [] 
     authentication_classes = []
@@ -28,123 +48,22 @@ class SearchBookView(APIView):
                 "message": "The Title of the book is required"
             }, status = status.HTTP_400_BAD_REQUEST)
         
-        start = (page - 1) * page_size
-        end = page * page_size
-        
-        #check database first for the book title
-        db_books = Book.objects.filter(Q(title__icontains = query)).order_by("id")
-        db_results = list(db_books[start:end])
+        # Call service function (returns dict, never Response)
+        result = search_books(query, page, page_size)
 
-        results = [
-            {
-                "id": book.id,
-                "title": book.title,
-                "author": book.author,
-                "cover": book.cover,
-                "release_date": book.release_date,
-                "genre": book.genre
-            }
-            for book in db_results
-        ]
-
-        # If DB already fills this page completely, return immediately
-        if len(results) == page_size:
+        # Check if there was an error
+        if "error" in result:
             return Response({
-                "source": "db",
-                "page": page,
-                "page_size": page_size,
-                "results": results
-            })
+                "message": result["error"]
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        # 2. CALL OPEN LIBRARY ONLY IF PAGE IS INCOMPLETE
-        needed = page_size - len(results)
-        
-        url = f"https://openlibrary.org/search.json?q={query}&page={page}&limit={page_size}"
-        #search for the book title in the open library api if there are not enough results in the database
-        response = requests.get(url)
-
-        if response.status_code != 200:
-            return Response({
-                "message": "API was unable to process the request"
-            }, status = status.HTTP_503_SERVICE_UNAVAILABLE)
-        
-        data = response.json()
-        print(data.get("docs", [])[:3])
-
-        #sort the results by edition count in descending order to get the most popular books first
-        docs = sorted( 
-            data.get("docs", []), 
-            key=lambda x: x.get("edition_count", 0), 
-            reverse=True
-        ) 
-        
-        #defining a list to hold the cleaned and formatted book data fetched from the API
-        clean_books = []
-
-        existing_ids = {book.id for book in db_results}
-
-        for item in docs:
-            if len(clean_books) >= needed:
-                break
-
-            if not item.get("title") or not item.get("key"):
-                continue
-
-            title = item["title"] #recall, .get is accompanied by () and [] allows us to use without .get. we are using [] here because we want to ensure that the title is always present, as it's crucial for identifying the book in our database. If it's missing, we want the code to raise an error rather than silently failing.
-
-            if "summary" in title.lower():
-                continue
-
-            #dictionary for results saved to Book model database
-            genres = item.get("subject", [])[:3]
-
-            if not genres:
-                details_url = f"https://openlibrary.org{item['key']}.json"
-                details_response = requests.get(details_url)
-
-                if details_response.status_code == 200:
-                    details_data = details_response.json()
-                    genres = details_data.get("subjects", [])[:3] 
-
-            book_data = {
-                "external_id": item["key"], #not using .get() here because we want to ensure that this key is always present, as it's crucial for identifying the book in our database. If it's missing, we want the code to raise an error rather than silently failing.
-                "title": title, 
-                "author": item.get("author_name", ["Unknown Author"])[0],
-                "release_date": item.get("first_publish_year"),
-                "cover": f"https://covers.openlibrary.org/b/id/{item.get('cover_i')}-M.jpg",
-                "genre": genres
-                
-            #[]square brackets make conditions a MUST, while .get() is more flexible and allows for missing data without breaking the code. .get() returns None if the key is not found, while [] raises a KeyError.
-            }
-
-            #django object is created after saving book_data dictionary to the database
-            book_obj, created = Book.objects.get_or_create( 
-                external_id=book_data["external_id"],
-                defaults=book_data
-            )
-
-            if book_obj.id in existing_ids:
-                continue
-
-            #display for API results
-            clean_books.append({
-                "id": book_obj.id, #id instead of external_id for frontend use
-                "title": book_obj.title,
-                "author": book_obj.author,
-                "cover": book_obj.cover,
-                "release_date": book_obj.release_date,
-                "genre": book_obj.genre
-            })
-             
-        
-        # 🔄 6. COMBINE DB + API RESULTS
-        combined = results + clean_books 
-        
+        # View wraps service output in Response with HTTP metadata
         return Response({
-            "source": "mixed",
+            "message": "Search completed successfully",
+            "source": result["source"],
             "page": page,
             "page_size": page_size,
-            "results": combined
+            "results": result["results"]
         })
 
 
@@ -231,3 +150,54 @@ class DeleteUserBookView(APIView):
         return Response({
             "message": "Book removed from library successfully"
         }, status=status.HTTP_204_NO_CONTENT)
+
+class BookDetailView(APIView):
+    permission_classes = [] 
+    authentication_classes = []
+
+    def get(self, request, book_id):
+
+        data, error = get_book_detail(book_id)
+
+        if error == "not_found":
+            return Response(
+                {"message": "Book not found"},
+                status=404
+            )
+
+        return Response(data, status = status.HTTP_200_OK)
+
+    
+class UserProfileView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        
+        profile_data = get_userbook_profile(user)
+
+        return Response(profile_data, status = status.HTTP_200_OK)
+
+class TrendingView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    def get(self, request):
+
+        data = get_trending_books()
+
+        return Response(data, status = status.HTTP_200_OK)
+
+        
+class RecommendationView(APIView):
+    #only authenticated users can get recommendations
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        #fetch user
+        user = request.user
+
+        data = get_recommendations(user)
+
+        return Response(data, status = status.HTTP_200_OK)

@@ -29,6 +29,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
+API_KEY = os.getenv("API_KEY")
 
 # Application definition
 

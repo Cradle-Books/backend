@@ -1,0 +1,89 @@
+import requests
+from ..models import Book, UserBook
+from .google_books import fetch_google_book
+
+
+def get_book_detail(book_id):
+
+    try:
+        book = Book.objects.get(id=book_id)
+    except Book.DoesNotExist:
+        return None, "not_found"
+
+    number_of_readers = UserBook.objects.filter(book=book).count()
+
+    # ------------------------
+    # RETURN CACHED DATA FAST
+    # ------------------------
+    if book.description and book.page_count:
+        return {
+            "id": book.id,
+            "title": book.title,
+            "author": book.author,
+            "cover": book.cover,
+            "release_date": book.release_date,
+            "genre": book.genre,
+            "description": book.description,
+            "page_count": book.page_count,
+            "number_of_readers": number_of_readers
+        }, None
+
+    # ------------------------
+    # OPENLIBRARY FETCH
+    # ------------------------
+    description = None
+    page_count = None
+
+    try:
+        url = f"https://openlibrary.org{book.external_id}.json"
+        response = requests.get(url, timeout=5)
+
+        if response.status_code == 200:
+            data = response.json()
+
+            description = data.get("description")
+            if isinstance(description, dict):
+                description = description.get("value")
+
+            page_count = data.get("number_of_pages")
+            if isinstance(page_count, dict):
+                page_count = page_count.get("value")
+
+    except Exception:
+        pass
+
+    # ------------------------
+    # GOOGLE BOOKS FALLBACK
+    # ------------------------
+    if not description or not page_count:
+        google_data = fetch_google_book(book.title, book.author)
+
+        if google_data:
+            if not description:
+                description = google_data.get("description")
+
+            if not page_count:
+                page_count = google_data.get("page_count")
+
+    # ------------------------
+    # CACHE INTO DB
+    # ------------------------
+    if description and not book.description:
+        book.description = description
+
+    if page_count and not book.page_count:
+        book.page_count = page_count
+
+    book.save()
+
+    return {
+        "id": book.id,
+        "title": book.title,
+        "author": book.author,
+        "cover": book.cover,
+        "release_date": book.release_date,
+        "genre": book.genre,
+        "description": book.description,
+        "page_count": book.page_count,
+        "number_of_readers": number_of_readers
+    }, None
