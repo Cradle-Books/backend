@@ -3,3 +3,5 @@ credentials.json
 __pycache__/
 db.sqlite3
 token.json
+venv/
+*.py[cod]

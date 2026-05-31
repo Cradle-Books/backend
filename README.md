@@ -398,3 +398,6 @@ HTTP 204 No Content
 - whenever you checkout to the main branch, pull always
 - then git checkout "-new branch"
 - merge the subsidiary branches with the main branch when work on them is complete
+
+## Before running scripts in terminal
+run: Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
