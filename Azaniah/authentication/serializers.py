@@ -6,12 +6,21 @@ from .models import Account, Profile, Genre
 class AccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
-        fields = ['Email', 'First_name', 'Last_name', 'Password']
+        fields = ['Email', 'Username', 'Password', 'Confirm_Password']
+        extra_kwargs = {
+            'Password': {'write_only': True},
+            'Confirm_Password': {'write_only': True},
+        }
+#serializer validity for password confirmation is placed here i order to have effect in views.py
+    def validate(self, data):
+        if data['Password'] != data['Confirm_Password']:
+            raise serializers.ValidationError({
+                'Confirm_Password': 'Passwords must match.'
+            })
+        return data
 
 class ProfileSerializer(serializers.ModelSerializer):
     #read only fields gotten from the account
-    First_name = serializers.CharField(source='account.First_name', read_only=True)
-    Last_name = serializers.CharField(source='account.Last_name', read_only=True)
     Email = serializers.EmailField(source='account.Email', read_only=True)
     
     # Handle Favourite_genres as a list of genre keys
@@ -23,7 +32,7 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Profile
-        fields = ['Email', 'First_name','Last_name', 'Username', 'Phone', 'Country', 'Address', 'Favourite_genres', 'created_at', 'updated_at']
+        fields = ['Email', 'Username', 'Phone', 'Country', 'Address', 'Favourite_genres', 'created_at', 'updated_at']
 
 
 class ChangePasswordSerializer(serializers.Serializer):

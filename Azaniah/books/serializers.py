@@ -4,13 +4,14 @@ from .models import Book, UserBook
 class BookSerializer(serializers.ModelSerializer):
     class Meta:
         model = Book
-        fields = ['title', 'author', 'genre', 'cover', 'description', 'release_date', 'page_count', 'external_id', 'google_books_id']
+        fields = ['id', 'title', 'author', 'genre', 'cover', 'description', 'release_date', 'page_count', 'external_id', 'google_books_id']
 
 class UserBookSerializer(serializers.ModelSerializer):
+    book_details = BookSerializer(source='book', read_only=True)
 
     class Meta:
         model = UserBook
-        fields = ['id', 'book', 'status', 'ratings', 'review', 'created_at', 'updated_at']
+        fields = ['id', 'book', 'book_details', 'status', 'ratings', 'review', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def validate_book(self, value):

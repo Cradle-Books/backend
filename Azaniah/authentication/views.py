@@ -40,6 +40,7 @@ class AccountView(APIView):
 
             cache_data = {
                 'user_data': serializer.validated_data,
+                'username': request.data.get('Username', ''),
                 'otp': otp
             }
             
@@ -111,7 +112,10 @@ class VerifyOTPView(APIView):
         #Create Account and Profile
         account = Account(**user_data)
         account.save()  # This will trigger the password hashing in model.save()
-        Profile.objects.create(account=account)  # student profile is created alongside user
+        Profile.objects.create(
+            account=account,
+            Username=cached_data.get('username', '')
+        )  # student profile is created alongside user
 
         # Create Django User for Authentication
         if not User.objects.filter(username=account.Email).exists():
@@ -137,7 +141,13 @@ class LoginView(APIView):
         if not email or not password:
             return Response({"message": "Email and Password are required"}, status = status.HTTP_400_BAD_REQUEST)
         
-        account = Account.objects.get(Email = email)
+        try:
+            account = Account.objects.get(Email=email)
+        except Account.DoesNotExist:
+            return Response(
+                {"message": "Invalid Credentials"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
 
         if not check_password(password, account.Password):
             return Response({"message": "Invalid Credentials"}, status = status.HTTP_400_BAD_REQUEST)
@@ -525,7 +535,6 @@ class ChangePasswordView(APIView):
 
             
         
-
 
 
 

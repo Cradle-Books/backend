@@ -36,13 +36,16 @@ GENRE_CHOICES = [
 
 class Account(models.Model):
     Email = models.EmailField(unique=True)
-    First_name = models.CharField(max_length=150, blank=True)
-    Last_name = models.CharField(max_length=150, blank=True)
+    Username = models.CharField(max_length=150, blank=True)
     Password = models.CharField(max_length=255)
+    Confirm_Password = models.CharField(max_length=255)
+
 
     def save(self, *args, **kwargs):
         if self.Password and not self.Password.startswith('pbkdf2_sha256$'):
             self.Password = make_password(self.Password)
+        if self.Confirm_Password and not self.Confirm_Password.startswith('pbkdf2_sha256$'):
+            self.Confirm_Password = make_password(self.Confirm_Password)
         super().save(*args, **kwargs)
 
 class Profile(models.Model):
@@ -105,4 +108,3 @@ class Profile(models.Model):
         """Access email from Account"""
         return self.account.Email
     
-
