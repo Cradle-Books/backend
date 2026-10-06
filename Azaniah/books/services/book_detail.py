@@ -1,6 +1,9 @@
 import requests
+import logging
 from ..models import Book, UserBook
 from .google_books import fetch_google_book
+
+logger = logging.getLogger(__name__)
 
 
 def get_book_detail(book_id):
@@ -36,7 +39,7 @@ def get_book_detail(book_id):
 
     try:
         url = f"https://openlibrary.org{book.external_id}.json"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=15)
 
         if response.status_code == 200:
             data = response.json()
@@ -49,8 +52,8 @@ def get_book_detail(book_id):
             if isinstance(page_count, dict):
                 page_count = page_count.get("value")
 
-    except Exception:
-        pass
+    except requests.RequestException:
+        logger.warning("Open Library detail request failed for book %s", book.id, exc_info=True)
 
     # ------------------------
     # GOOGLE BOOKS FALLBACK

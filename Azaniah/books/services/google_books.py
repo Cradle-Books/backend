@@ -1,8 +1,8 @@
 import requests
-from ..models import Book
-from rest_framework.response import Response
-from rest_framework import status
 from django.conf import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 def fetch_google_book(title, author):
     url = "https://www.googleapis.com/books/v1/volumes"
@@ -12,7 +12,11 @@ def fetch_google_book(title, author):
         "key": settings.API_KEY
     }
 
-    response = requests.get(url, params=params)
+    try:
+        response = requests.get(url, params=params, timeout=15)
+    except requests.RequestException:
+        logger.warning("Google Books request failed for %r by %r", title, author, exc_info=True)
+        return None
 
     if response.status_code != 200:
         return None
