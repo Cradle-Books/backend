@@ -118,13 +118,11 @@ class VerifyOTPView(APIView):
         )  # student profile is created alongside user
 
         # Create Django User for Authentication
-        if not User.objects.filter(username=account.Email).exists():
+        if not User.objects.filter(email=account.Email).exists():
             User.objects.create_user(
-                username=account.Email,
+                username=account.Username,
                 email=account.Email,
-                password=user_data.get('Password'),  # Use the raw password from user_data
-                first_name=account.First_name,
-                last_name=account.Last_name
+                password=user_data.get('Password')  # Use the raw password from user_data
             )
         
         
@@ -135,14 +133,14 @@ class LoginView(APIView):
     authentication_classes = []
 
     def post(self, request):
-        email = request.data.get('Email')
+        username = request.data.get('Username')
         password = request.data.get('Password')
 
-        if not email or not password:
-            return Response({"message": "Email and Password are required"}, status = status.HTTP_400_BAD_REQUEST)
+        if not username or not password:
+            return Response({"message": "Username and Password are required"}, status = status.HTTP_400_BAD_REQUEST)
         
         try:
-            account = Account.objects.get(Email=email)
+            account = Account.objects.get(Username=username)
         except Account.DoesNotExist:
             return Response(
                 {"message": "Invalid Credentials"},
@@ -152,7 +150,8 @@ class LoginView(APIView):
         if not check_password(password, account.Password):
             return Response({"message": "Invalid Credentials"}, status = status.HTTP_400_BAD_REQUEST)
         
-        user = authenticate(username = email, password = password)
+        # Django's User username is the Username created during OTP verification.
+        user = authenticate(username=account.Username, password=password)
 
         if user:
             # Generate Tokens
@@ -160,7 +159,7 @@ class LoginView(APIView):
 
             return Response({
                 'message': 'Login successful',
-                'email': user.email,
+                'username': user.username,
                 'refresh': str(refresh),
                 'access': str(refresh.access_token),
             }, status=status.HTTP_200_OK)
@@ -535,6 +534,4 @@ class ChangePasswordView(APIView):
 
             
         
-
-
 

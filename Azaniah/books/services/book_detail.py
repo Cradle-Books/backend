@@ -18,7 +18,7 @@ def get_book_detail(book_id):
     # ------------------------
     # RETURN CACHED DATA FAST
     # ------------------------
-    if book.description and book.page_count:
+    if book.description and book.average_rating is not None:
         return {
             "id": book.id,
             "title": book.title,
@@ -28,6 +28,7 @@ def get_book_detail(book_id):
             "genre": book.genre,
             "description": book.description,
             "page_count": book.page_count,
+            "average_rating": book.average_rating,
             "number_of_readers": number_of_readers
         }, None
 
@@ -36,6 +37,7 @@ def get_book_detail(book_id):
     # ------------------------
     description = None
     page_count = None
+    average_rating = book.average_rating
 
     try:
         url = f"https://openlibrary.org{book.external_id}.json"
@@ -58,7 +60,7 @@ def get_book_detail(book_id):
     # ------------------------
     # GOOGLE BOOKS FALLBACK
     # ------------------------
-    if not description or not page_count:
+    if not description or not page_count or average_rating is None:
         google_data = fetch_google_book(book.title, book.author)
 
         if google_data:
@@ -67,6 +69,8 @@ def get_book_detail(book_id):
 
             if not page_count:
                 page_count = google_data.get("page_count")
+            if average_rating is None:
+                average_rating = google_data.get("average_rating")
 
     # ------------------------
     # CACHE INTO DB
@@ -76,6 +80,8 @@ def get_book_detail(book_id):
 
     if page_count and not book.page_count:
         book.page_count = page_count
+    if average_rating is not None and book.average_rating is None:
+        book.average_rating = average_rating
 
     book.save()
 
@@ -88,5 +94,6 @@ def get_book_detail(book_id):
         "genre": book.genre,
         "description": book.description,
         "page_count": book.page_count,
+        "average_rating": book.average_rating,
         "number_of_readers": number_of_readers
     }, None

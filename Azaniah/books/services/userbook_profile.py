@@ -1,10 +1,24 @@
 from rest_framework.response import Response
 from ..models import UserBook
+from Azaniah.authentication.models import Account, Profile
 from django.db.models import Avg
 
 def get_userbook_profile(user):
         
     user_book = UserBook.objects.filter(user=user)
+    profile_username = (
+        Profile.objects.filter(account__Email=user.email)
+        .values_list("Username", flat=True)
+        .first()
+    )
+    account_username = (
+        Account.objects.filter(Email=user.email)
+        .values_list("Username", flat=True)
+        .first()
+    )
+    username = profile_username or account_username
+    if not username and user.username != user.email:
+        username = user.username
 
     total_books = user_book.count()
     reading_qs = user_book.filter(status="reading")
@@ -29,7 +43,7 @@ def get_userbook_profile(user):
     ]
 
     return {
-        "username": user.username,
+        "username": username or "",
         "total_books": total_books,
         "reading": reading_qs.count(),
         "finished": finished,

@@ -4,7 +4,7 @@ from .models import Book, UserBook
 class BookSerializer(serializers.ModelSerializer):
     class Meta:
         model = Book
-        fields = ['id', 'title', 'author', 'genre', 'cover', 'description', 'release_date', 'page_count', 'external_id', 'google_books_id']
+        fields = ['id', 'title', 'author', 'genre', 'cover', 'description', 'release_date', 'page_count', 'average_rating', 'external_id', 'google_books_id']
 
 class UserBookSerializer(serializers.ModelSerializer):
     book_details = BookSerializer(source='book', read_only=True)

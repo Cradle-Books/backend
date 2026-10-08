@@ -36,7 +36,7 @@ GENRE_CHOICES = [
 
 class Account(models.Model):
     Email = models.EmailField(unique=True)
-    Username = models.CharField(max_length=150, blank=True)
+    Username = models.CharField(max_length=150, unique=True)
     Password = models.CharField(max_length=255)
     Confirm_Password = models.CharField(max_length=255)
 

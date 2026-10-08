@@ -14,6 +14,7 @@ class Book(models.Model):
     description = models.CharField(max_length = 250000)
     page_count = models.IntegerField(null = True, blank = True)
     external_id = models.CharField(max_length = 100, unique = True)
+    average_rating = models.FloatField(null = True, blank = True)
 
     def __str__(self):
         return f"{self.title} - {self.author}"

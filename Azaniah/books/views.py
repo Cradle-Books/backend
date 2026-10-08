@@ -39,7 +39,7 @@ class SearchBookView(APIView):
     def get(self, request):
         query = request.GET.get('q')
         page = int(request.GET.get('page'))
-        page_size = int(request.GET.get("page_size", 10))
+        page_size = int(request.GET.get("page_size", 12))
 
 
         #check if the query(or what is to be searched for) is provided
