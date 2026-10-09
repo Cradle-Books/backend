@@ -1,9 +1,15 @@
 from django.contrib.auth.hashers import make_password
 from rest_framework import serializers
 from .models import Account, Profile, Genre
+from django.core.exceptions import ValidationError
 
+def validate_no_at_symbol(value):
+    if '@' in value:
+        raise ValidationError("The '@' symbol is not allowed in this field.")
+    return value
 
 class AccountSerializer(serializers.ModelSerializer):
+    Username = serializers.CharField(validators=[validate_no_at_symbol])
     class Meta:
         model = Account
         fields = ['Email', 'Username', 'Password', 'Confirm_Password']
@@ -22,6 +28,7 @@ class AccountSerializer(serializers.ModelSerializer):
 class ProfileSerializer(serializers.ModelSerializer):
     #read only fields gotten from the account
     Email = serializers.EmailField(source='account.Email', read_only=True)
+    username = serializers.SerializerMethodField()
     
     # Handle Favourite_genres as a list of genre keys
     Favourite_genres = serializers.SlugRelatedField(
@@ -32,7 +39,10 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Profile
-        fields = ['Email', 'Username', 'Phone', 'Country', 'Address', 'Favourite_genres', 'created_at', 'updated_at']
+        fields = ['Email', 'Username', 'username', 'Phone', 'Country', 'Address', 'Favourite_genres', 'created_at', 'updated_at', 'privacy']
+
+    def get_username(self, profile):
+        return profile.Username.strip() or profile.account.Username.strip()
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -46,4 +56,5 @@ class ChangePasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError({"confirm_password": "New passwords must match."})
         return data
     
+
     

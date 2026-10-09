@@ -201,30 +201,24 @@ class AccountProfileView(APIView):
 
 
     def get(self, request):
-        #need to know the account in order to check in with the database and provide the right profile
-        email = request.data.get('email')
-
+        email = request.user.email
         if not email:
-            return Response({
-                "message": "email is required to view profile"},
-                  status = status.HTTP_400_BAD_REQUEST)
-        
-        #this part is carried out if email is provided
-        try:
-            cache_key = f'signup_user_{email}'
-            cache_profile = cache.get(cache_key)
+            return Response(
+                {"message": "The authenticated user has no email address."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-            account = Account.objects.get(Email = email)
+        try:
+            account = Account.objects.get(Email=email)
             try:
-                profile = Profile.objects.get(account = account)
-            except:
-                return Response({
-                    "message": "Profile doesn't exist"
-                }, status = status.HTTP_400_BAD_REQUEST)
+                profile = Profile.objects.get(account=account)
+            except Profile.DoesNotExist:
+                return Response(
+                    {"message": "Profile doesn't exist"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
             
             serializer = ProfileSerializer(profile)
-
-            cache.set(cache_key, serializer.data, timeout=3600)
             
             return Response({
                 'message': 'Profile retrieved successfully',
@@ -532,6 +526,12 @@ class ChangePasswordView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-            
+        
         
 
+
+
+
+
+            
+        

@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 from django.core.validators import MinValueValidator, MaxValueValidator
 
 # Create your models here.
@@ -52,6 +53,7 @@ class UserBook(models.Model):
     review = models.TextField(null = True, blank = True)
     created_at = models.DateTimeField(auto_now_add = True)
     updated_at = models.DateTimeField(auto_now = True)
+    status_changed_at = models.DateTimeField(timezone.now, null = True, blank = True)
     class Meta:
         #this means that individual fields aren't unique, but only unique as a pair. i.e teni - fences != teni - verity
         unique_together = ('user', 'book')

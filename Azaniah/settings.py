@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'Azaniah.authentication',
     'Azaniah.books',
+    'Azaniah.follow',
 ]
 
 MIDDLEWARE = [

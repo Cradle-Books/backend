@@ -121,9 +121,16 @@ class UpdateLibraryView(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
 
         serializer = UserBookSerializer(user_book, data=request.data, partial=True, context={'request': request})
+        status_changed = (
+            "status" in request.data and request.data["status"] != user_book.status
+        )
 
-        if serializer.is_valid():
+        if serializer.is_valid(): 
             updated_book = serializer.save()
+            if status_changed:
+                updated_book.status_changed_at = timezone.now()
+                updated_book.save(update_fields = ["status_changed_at"])
+
             return Response({
                 "message": "Book updated successfully",
                 "data": UserBookSerializer(updated_book, context={'request': request}).data

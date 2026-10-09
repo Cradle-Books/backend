@@ -1,5 +1,6 @@
 from django.contrib.auth.hashers import make_password
 from django.db import models
+from django.core.exceptions import ValidationError
 
 # Genre model for storing available book genres
 class Genre(models.Model):
@@ -34,6 +35,7 @@ GENRE_CHOICES = [
     ('young_adult', 'Young Adult'),
 ]
 
+
 class Account(models.Model):
     Email = models.EmailField(unique=True)
     Username = models.CharField(max_length=150, unique=True)
@@ -49,6 +51,10 @@ class Account(models.Model):
         super().save(*args, **kwargs)
 
 class Profile(models.Model):
+    class PrivacySettings(models.TextChoices):
+        PUBLIC = 'public', 'Public'
+        PRIVATE = 'private', 'Private'
+
     account = models.OneToOneField(
         Account,
         on_delete=models.CASCADE, 
@@ -59,6 +65,11 @@ class Profile(models.Model):
     Phone = models.CharField(max_length=20, blank=True)
     Country = models.CharField(max_length=100, blank=True)
     Address = models.CharField(max_length=255, blank=True)
+    privacy = models.CharField(
+        max_length=10,
+        choices=PrivacySettings.choices, #PrivacySettings calls the class
+        default=PrivacySettings.PUBLIC
+    )
     #ManyToMany field to store user's favourite genres, allowing multiple selections,
     #will be very useful for our recommendation system and finding friends with similar tastes
     Favourite_genres = models.ManyToManyField(Genre, blank=True)

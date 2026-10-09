@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_book_detail(book_id):
+    result = recent_activity(book_id)
 
     try:
         book = Book.objects.get(id=book_id)
@@ -29,7 +30,8 @@ def get_book_detail(book_id):
             "description": book.description,
             "page_count": book.page_count,
             "average_rating": book.average_rating,
-            "number_of_readers": number_of_readers
+            "number_of_readers": number_of_readers,
+            "recent_activity": result,
         }, None
 
     # ------------------------
@@ -95,5 +97,19 @@ def get_book_detail(book_id):
         "description": book.description,
         "page_count": book.page_count,
         "average_rating": book.average_rating,
-        "number_of_readers": number_of_readers
+        "number_of_readers": number_of_readers,
+        "recent_activity": result,
     }, None
+
+def recent_activity(book_id):
+    recent_users = UserBook.objects.filter(book_id=book_id).select_related('user').order_by('-status_changed_at')[:5]
+
+    return [
+        {
+            "user": people.user.username,
+            "status": people.status,
+            "status_changed_at": people.status_changed_at
+        }
+        for people in recent_users
+    ] #a return method inside a loop would exit after the first iteration, so we use this.
+
