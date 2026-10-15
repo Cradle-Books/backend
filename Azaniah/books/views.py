@@ -14,6 +14,7 @@ from .services.book_detail import get_book_detail
 from .services.userbook_profile import get_userbook_profile
 from .services.trending_books import get_trending_books
 from .services.recommendations import get_recommendations
+from django.utils import timezone
 
 # Create your views here.
 

@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'Azaniah.authentication',
     'Azaniah.books',
     'Azaniah.follow',
+    "Azaniah.chatapp",
 ]
 
 MIDDLEWARE = [

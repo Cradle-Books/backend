@@ -1,11 +1,10 @@
 from django.contrib.auth.hashers import make_password
 from rest_framework import serializers
 from .models import Account, Profile, Genre
-from django.core.exceptions import ValidationError
 
 def validate_no_at_symbol(value):
     if '@' in value:
-        raise ValidationError("The '@' symbol is not allowed in this field.")
+        raise serializers.ValidationError("Username cannot contain '@'.")
     return value
 
 class AccountSerializer(serializers.ModelSerializer):
