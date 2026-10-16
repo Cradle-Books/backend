@@ -43,6 +43,7 @@ API_KEY = os.getenv("API_KEY")
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -174,4 +175,5 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
+ASGI_APPLICATION = "Azaniah.asgi.application"
 
