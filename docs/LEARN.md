@@ -685,8 +685,286 @@ WebSocket: ws://localhost:8001/ws/echo/
 
 The echo worked on 8001. This confirms our intended server and WebSocket route work there; it does not establish exactly which process was answering on 8000.
 
-## Where to resume next time
+## Moving from plain text to JSON
 
-Completed: models and database practice, Channels/Daphne setup, echo consumer, WebSocket routing, and a successful browser echo test.
+Our plain-text echo received a string such as `Hello!`. A chat feature needs structured information so it can distinguish messages from future events such as typing notifications.
 
-Next: move from echoing text to designing authenticated private chat. We will learn how to identify the connected Django user, check conversation membership, and then save and deliver messages. We will continue in small steps with each line explained.
+Think of plain text as a loose note, and JSON as a form with named boxes:
+
+```json
+{
+    "type": "chat.message",
+    "content": "Hello!"
+}
+```
+
+- `type` describes the event's purpose.
+- `content` contains the message text.
+- These fields are our application design, separate from ASGI's internal event dictionaries.
+
+### Why `chat.message` instead of `chatapp.message`?
+
+`chat.message` is a label we chose, not an import path or a reference to a Django model. We could choose `chatapp.message` or `new_message` instead, provided the browser and server agree.
+
+The category-and-event convention makes related events easy to recognize:
+
+```text
+chat.message
+chat.typing
+chat.read
+```
+
+Our initial JSON echo did not interpret this label; it returned the whole payload. The validation exercise below explicitly checks it.
+
+Later, when using a Channels channel layer, an internal event's `type` has a separate dispatch role: `chat.message` selects a handler called `chat_message`. Merely including this field in browser JSON does not perform that dispatch.
+
+### The JSON echo consumer
+
+In `backend/Azaniah/chatapp/consumers.py`, our next version was:
+
+```python
+from channels.generic.websocket import AsyncJsonWebsocketConsumer
+
+
+class EchoConsumer(AsyncJsonWebsocketConsumer):
+    async def connect(self):
+        await self.accept()
+
+    async def receive_json(self, content, **kwargs):
+        await self.send_json(content)
+```
+
+- `AsyncJsonWebsocketConsumer` adds JSON decoding and encoding to the WebSocket consumer behavior.
+- `receive_json()` receives the decoded Python value. A JSON object becomes a dictionary; a JSON array becomes a list.
+- `content` is a method argument holding the entire decoded payload. It is different from the dictionary field also named `"content"`.
+- `**kwargs` collects any additional keyword arguments passed to the method into a dictionary.
+- `send_json(content)` serializes the Python value to JSON and sends it to the connected browser.
+- Keeping the name `EchoConsumer` means our existing route still imports the correct class.
+
+Our browser JSON echo test worked. This remains a reply on the same socket, without database storage or delivery to a different user.
+
+## Testing JSON from the browser
+
+Keep the backend running on port 8001. Open `http://localhost:8001/`, refresh the page, and paste this complete block into the browser console:
+
+```javascript
+const socket = new WebSocket("ws://localhost:8001/ws/echo/");
+
+socket.onopen = () => {
+    console.log("Connected!");
+
+    socket.send(JSON.stringify({
+        type: "chat.message",
+        content: "Hello again!"
+    }));
+};
+
+socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log("Received:", data);
+};
+
+socket.onerror = (event) => {
+    console.log("Connection error:", event);
+};
+
+socket.onclose = (event) => {
+    console.log("Closed:", event.code, event.reason);
+};
+```
+
+- `JSON.stringify(...)` converts a JavaScript object into JSON text before transmission.
+- `JSON.parse(event.data)` converts the incoming JSON text into a JavaScript value.
+- `data.type` reads the returned event label, and `data.content` reads the message text.
+- Sending inside `onopen` ensures the socket is open first.
+- Attaching the handlers immediately helps avoid missing connection events.
+
+Expected output includes `Connected!` and a received object containing `type: "chat.message"` and `content: "Hello again!"`.
+
+### Why the console displayed a function
+
+After assigning `socket.onmessage`, the console displayed something like:
+
+```javascript
+(event) => {
+    const data = JSON.parse(event.data);
+    console.log(data.type);
+    console.log(data.content);
+}
+```
+
+That was the console showing the assigned function, not a received message or an error. The function runs later when a message arrives.
+
+### Checking `readyState`
+
+```javascript
+socket.readyState
+```
+
+| Value | State | Meaning |
+|---|---|---|
+| `0` | Connecting | The connection is being established |
+| `1` | Open | Ready to send messages |
+| `2` | Closing | The connection is shutting down |
+| `3` | Closed | This socket cannot be used to send messages |
+
+Our socket returned `3`. We created a fresh connection and the test then worked. A closed socket does not reopen; create a new `WebSocket` object. The state alone does not explain why it closed, so use browser errors, close information, and backend logs to investigate recurring failures.
+
+## Validating decoded JSON messages
+
+The server should check incoming data before processing it. Think of this as checking that a form has the right boxes and sensible answers before accepting it.
+
+This is the current exercise, following our successful JSON echo. Replace `receive_json()` in `EchoConsumer` with the method below; retain its import, class declaration, and `connect()` method:
+
+```python
+    async def receive_json(self, content, **kwargs):
+        if not isinstance(content, dict):
+            await self.send_json({
+                "type": "error",
+                "message": "Send a JSON object.",
+            })
+            return
+
+        if content.get("type") != "chat.message":
+            await self.send_json({
+                "type": "error",
+                "message": "Unsupported message type.",
+            })
+            return
+
+        text = content.get("content")
+
+        if not isinstance(text, str):
+            await self.send_json({
+                "type": "error",
+                "message": "Message content must be text.",
+            })
+            return
+
+        text = text.strip()
+
+        if not text:
+            await self.send_json({
+                "type": "error",
+                "message": "Message cannot be empty.",
+            })
+            return
+
+        if len(text) > 2000:
+            await self.send_json({
+                "type": "error",
+                "message": "Message cannot exceed 2000 characters.",
+            })
+            return
+
+        await self.send_json({
+            "type": "chat.message",
+            "content": text,
+        })
+```
+
+### Understanding each check
+
+**1. Require a dictionary**
+
+```python
+if not isinstance(content, dict):
+```
+
+`isinstance(value, type)` checks a value's Python type. Valid JSON can decode to a list, string, number, boolean, or `None`, so JSON decoding alone does not guarantee a dictionary. We check before calling dictionary methods.
+
+**2. Require a supported event label**
+
+```python
+if content.get("type") != "chat.message":
+```
+
+Dictionary `.get()` returns the value for a key, or `None` when the key is missing. `!=` means "is not equal to." Missing or unrecognized labels receive an error.
+
+This dictionary `.get()` is different from the ORM's `.get()`: `Message.objects.get(...)` retrieves a database record and can raise an exception when none exists.
+
+**3. Retrieve and check the message body**
+
+```python
+text = content.get("content")
+
+if not isinstance(text, str):
+```
+
+The first line gets the body, or `None` if missing. The condition requires a string before we use string methods. Numbers and missing content are rejected.
+
+**4. Remove whitespace at the edges**
+
+```python
+text = text.strip()
+```
+
+`"  Hello!  "` becomes `"Hello!"`. Spaces between words remain. A string containing only spaces becomes an empty string.
+
+**5. Reject an empty result**
+
+```python
+if not text:
+```
+
+An empty string is false in a Python condition. After stripping, this catches both empty messages and whitespace-only messages.
+
+**6. Limit the length**
+
+```python
+if len(text) > 2000:
+```
+
+We chose 2,000 as an application limit, applied after stripping. Python counts Unicode code points here; some visible symbols, such as combined emoji, contain more than one code point. This body-length rule is not a network frame-size limit.
+
+**7. Stop processing invalid input**
+
+Each error response uses `send_json()` and then `return`. `return` exits this method call, preventing invalid data from reaching the successful response. It leaves the socket available for another message.
+
+**8. Reply with validated data**
+
+The final `send_json()` returns our chosen event label and cleaned text. It does not blindly echo extra fields from the client. It still does not save anything or deliver to another participant.
+
+### Validation practice
+
+After saving and reconnecting, use the JSON browser test above. Its `onmessage` handler prints the whole response, including error objects.
+
+Send each case separately while `socket.readyState` is `1`:
+
+```javascript
+socket.send(JSON.stringify({type: "chat.message", content: "   "}));
+```
+
+Expected: `Message cannot be empty.`
+
+```javascript
+socket.send(JSON.stringify({type: "chat.message", content: 123}));
+```
+
+Expected: `Message content must be text.`
+
+```javascript
+socket.send(JSON.stringify({type: "chat.message", content: "  Hello!  "}));
+```
+
+Expected: a `chat.message` response with content `Hello!`.
+
+Additional exercises:
+
+| Input passed to `JSON.stringify(...)` | Expected response |
+|---|---|
+| `[]` | Send a JSON object. |
+| `{type: "chat.typing", content: "Hello"}` | Unsupported message type. |
+| `{type: "chat.message"}` | Message content must be text. |
+| `{type: "chat.message", content: "a".repeat(2001)}` | Message cannot exceed 2000 characters. |
+| `{type: "chat.message", content: "a".repeat(2000)}` | Successful message response |
+
+These checks operate after JSON decoding. Malformed JSON text is a separate error-handling topic; this exercise does not implement that handling. Continue using `JSON.stringify()` for these tests.
+
+## Current progress and next steps
+
+Completed: models and database practice, Channels/Daphne setup, WebSocket routing, a successful text echo, and a successful JSON echo on port 8001.
+
+In progress: implementing and practicing decoded-message validation. Confirm the valid and invalid cases before moving on.
+
+Next: authenticated private chat. We will identify the connected Django user, check conversation membership, and then save and deliver messages. We will continue in small steps with each line explained.

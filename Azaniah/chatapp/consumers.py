@@ -8,8 +8,49 @@ class EchoConsumer(AsyncJsonWebsocketConsumer): #this class inherits from AsyncW
         await self.accept() #self refers to the instance of the EchoConsumer class. The accept() method is called to accept the WebSocket connection, allowing communication between the client and server.
 
     async def receive_json(self, content, **kwargs): #channels calls recerve() when a connected browser send a message
-        if content is not None:
-            await self.send_json(content)
+        if not isinstance(content, dict): 
+            await self.send_json({
+                "type": "error",
+                "message": "Send a JSON object",
+            })
+            return
+
+        if content.get("type") != "chat.message":
+            await self.send_json({
+                "type": "error",
+                "message": "Unsupported message type",
+            })
+            return
+        
+        text = content.get("content")
+
+        if not isinstance(text, str): #checks that the instance of the text is a string.
+            await self.send_json({
+                "type": "error",
+                "message": "Message content must be a string",
+            })
+            return
+
+        text = text.strip()
+
+        if not text:
+            await self.send_json({
+                "type": "error",
+                "message": "Message content cannot be empty",
+            })
+            return
+
+        if len(text) > 1000:
+            await self.send_json({
+                "type": "error",
+                "message": "Message content cannot exceed 1000 characters",
+            })
+            return
+
+        await self.send_json({
+            "type": "chat.message",
+            "content": text,
+        })
 
         """reason for this echoconsumer is to test the websocket connection.
         the exact messages sent by the client are echoed(resent) back to the client.
