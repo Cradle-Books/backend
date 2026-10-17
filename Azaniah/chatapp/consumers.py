@@ -1,15 +1,15 @@
-from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.generic.websocket import AsyncJsonWebsocketConsumer #websocket behavior that adds JSON encoding and decoding
 
-class EchoConsumer(AsyncWebsocketConsumer): #this class inherits from AsyncWebsocketConsumer, which is a base class provided by Django Channels for handling WebSocket connections asynchronously.
+class EchoConsumer(AsyncJsonWebsocketConsumer): #this class inherits from AsyncWebsocketConsumer, which is a base class provided by Django Channels for handling WebSocket connections asynchronously.
     async def connect(self):
         """channels calls connect() when a browser client attempts to establish a WebSocket connection with 
         the server. The method is asynchronous, allowing it to handle
         multiple connections concurrently without blocking the event loop."""
         await self.accept() #self refers to the instance of the EchoConsumer class. The accept() method is called to accept the WebSocket connection, allowing communication between the client and server.
 
-    async def receive(self, text_data = None, bytes_data = None): #channels calls recerve() when a connected browser send a message
-        if text_data is not None:
-            await self.send(text_data = text_data)
+    async def receive_json(self, content, **kwargs): #channels calls recerve() when a connected browser send a message
+        if content is not None:
+            await self.send_json(content)
 
         """reason for this echoconsumer is to test the websocket connection.
         the exact messages sent by the client are echoed(resent) back to the client.
