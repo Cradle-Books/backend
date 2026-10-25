@@ -9,6 +9,7 @@ from .views import (
     ResetPasswordView,
     ResetPasswordConfirmView,
     ChangePasswordView,
+    GenreListView,
 
 )
 
@@ -20,6 +21,7 @@ urlpatterns = [
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('profile/', AccountProfileView.as_view(), name='profile'),
+    path('genres/', GenreListView.as_view(), name='profile-genres'),
     
     # Password reset endpoints
     path('password-reset/', ResetPasswordView.as_view(), name='password-reset'),

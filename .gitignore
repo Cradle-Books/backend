@@ -4,5 +4,6 @@ __pycache__/
 db.sqlite3
 token.json
 venv/
+.reader-preview/
 *.py[cod]
 db.sqlite3

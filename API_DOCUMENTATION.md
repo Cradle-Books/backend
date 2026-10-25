@@ -18,11 +18,13 @@ Azaniah is a book discovery and personal library management platform built with 
 
 ### Key Features:
 - **User Authentication**: JWT-based authentication with email verification via OTP
-- **Book Search**: Search across local database and Google Books API
+- **Book Search**: Search the local database and Open Library; load full metadata through book details
 - **Personal Library**: Add, update, and manage your book collection
 - **Recommendations**: Get personalized book recommendations based on reading history
 - **Trending Books**: Discover trending books across the platform
 - **User Profile**: Manage personal information and favorite genres
+- **Profile Privacy**: Save public/private visibility; private profiles require approval for new follows. See [reader-page integration](docs/READER_PAGES.md) for the exact behavior and available genre endpoint.
+- **Community and Reader Activity**: Find readers, follow/request, approve/decline, cancel/unfollow, and view recent book shelf updates. See [Community API integration](docs/COMMUNITY.md) for endpoint examples, relationship IDs, public/private activity, and safe public handles.
 
 ---
 
@@ -75,7 +77,7 @@ Client
 
 **4. Pagination**
 - Search results support pagination with `page` and `page_size` parameters
-- Default page size is 10 results per request
+- Default search page size is 12 results per request
 
 **5. Relationship Management**
 - User-Book relationships stored in `UserBook` model
@@ -510,20 +512,20 @@ All endpoints are prefixed with this base URL.
 
 ### 1. Search Books
 
-**Endpoint:** `GET /books/search/`
+**Endpoint:** `GET /api/books/search/`
 
-**Purpose:** Search for books across database and Google Books API
+**Purpose:** Search cached titles/authors, then fill the page using one Open Library search request when needed. Search does not wait for per-book detail or Google Books lookups.
 
 **Authentication:** Not required
 
 **Query Parameters:**
-- `q` (required): Search query (book title)
+- `q` (required): Search query; cached books match title or author, and Open Library receives the same text
 - `page` (required): Page number (starts at 1)
-- `page_size` (optional): Results per page (default: 10)
+- `page_size` (optional): Results per page (default: 12); a response may contain fewer results
 
 **Example Request:**
 ```
-GET /books/search/?q=harry+potter&page=1&page_size=10
+GET /api/books/search/?q=harry+potter&page=1&page_size=12
 ```
 
 **Response (200 OK):**
@@ -532,7 +534,7 @@ GET /books/search/?q=harry+potter&page=1&page_size=10
   "message": "Search completed successfully",
   "source": "mixed",
   "page": 1,
-  "page_size": 10,
+  "page_size": 12,
   "results": [
     {
       "id": 1,
@@ -540,11 +542,10 @@ GET /books/search/?q=harry+potter&page=1&page_size=10
       "author": "J.K. Rowling",
       "genre": ["fantasy", "young_adult"],
       "cover": "https://example.com/cover.jpg",
-      "description": "A young wizard's first year at magic school...",
+      "description": "",
       "release_date": 1997,
-      "page_count": 309,
-      "external_id": "hp_1",
-      "google_books_id": "10_7zNECQYoC"
+      "work_id": "/works/OL82563W",
+      "average_rating": 4.4
     }
   ]
 }
@@ -557,17 +558,23 @@ GET /books/search/?q=harry+potter&page=1&page_size=10
     "message": "The Title of the book is required"
   }
   ```
-- `503 Service Unavailable` - External API error
+- `503 Service Unavailable` - Open Library times out, fails, or returns invalid data, and no cached results are available for this page
   ```json
   {
-    "message": "Error message from API"
+    "message": "Book search is temporarily unavailable. Please try again."
   }
   ```
 
 **Notes:**
 - Returns results from local database first
-- Falls back to Google Books API if needed
-- `source` can be: "db", "google_books", or "mixed"
+- Uses Open Library search to fill an incomplete page and saves discovered books in the database. This GET therefore can populate the local catalogue.
+- `source` is `"db"` when returned without external results, including an upstream failure with cached fallback. It is `"mixed"` after successful external processing, even if every returned book came from Open Library.
+- Descriptions may be empty, ratings and covers may be null, and genre lists may be empty. These are valid list responses. Use `GET /api/books/book/<book_id>/` for full metadata; that endpoint can still call Open Library and Google Books.
+- A full cached page requires no external calls. Otherwise, the single Open Library call has a 3-second connect timeout and a 10-second read timeout. These are socket limits, not a guaranteed total request duration.
+- When Open Library fails and this page has cached matches, the endpoint returns those matches with HTTP 200 and `source: "db"` rather than discarding them. There is no separate degraded-response flag.
+- The response has no total count, `next`, or `has_more` field. Fewer than 12 results can reflect cached fallback, filtering, or deduplication, not necessarily the end of all external matches. The current frontend uses a full-page heuristic for its Next button.
+- The example above shows one representative result; `page_size` is the requested maximum, not the length of the example array.
+- For the performance explanation, timeout walkthrough, and reproducible checks, see [Search latency and upstream failures](docs/SEARCH_TIMEOUTS.md).
 
 ---
 
@@ -986,7 +993,7 @@ Search results are paginated:
 {
   "message": "Search completed successfully",
   "page": 1,
-  "page_size": 10,
+  "page_size": 12,
   "results": [
     { /* book data */ }
   ]
@@ -1052,7 +1059,7 @@ curl -X GET http://localhost:8000/api/books/library/fetch/ \
 @accessToken = your_token_here
 
 ### Search Books
-GET {{baseUrl}}/books/search/?q=harry+potter&page=1
+GET {{baseUrl}}/books/search/?q=harry+potter&page=1&page_size=12
 
 ### Fetch Library
 GET {{baseUrl}}/books/library/fetch/

@@ -1,0 +1,9 @@
+version: 1
+name: cradle-reader-pages
+slug: cradle-reader-pages
+protocol: http
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

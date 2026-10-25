@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .serializers import AccountSerializer, ProfileSerializer, ChangePasswordSerializer
-from .models import Account, Profile
+from .models import Account, Profile, Genre
 from rest_framework import status
 import logging
 import threading
@@ -193,6 +193,15 @@ class LogoutView(APIView):
         except TokenError as e:
             return Response({'error': 'Invalid or expired token'}, status=status.HTTP_400_BAD_REQUEST)
 
+class GenreListView(APIView):
+    """Expose the stored genre keys accepted by ProfileSerializer."""
+    permission_classes = []
+    authentication_classes = []
+
+    def get(self, request):
+        return Response({"genres": list(Genre.objects.order_by("name").values("key", "name"))})
+
+
 class AccountProfileView(APIView):
 
     #to access one's profile, authentication is required through provision of a bearer token
@@ -212,7 +221,7 @@ class AccountProfileView(APIView):
             account = Account.objects.get(Email=email)
             try:
                 profile = Profile.objects.get(account=account)
-            except profile.DoesNotExist:
+            except Profile.DoesNotExist:
                 return Response(
                     {"message": "Profile doesn't exist"},
                     status=status.HTTP_404_NOT_FOUND,

@@ -1,7 +1,9 @@
 import requests
 import logging
+from django.db.models.functions import Coalesce
 from ..models import Book, UserBook
 from .google_books import fetch_google_book
+from Azaniah.authentication.models import Profile
 
 logger = logging.getLogger(__name__)
 
@@ -102,14 +104,34 @@ def get_book_detail(book_id):
     }, None
 
 def recent_activity(book_id):
-    recent_users = UserBook.objects.filter(book_id=book_id).select_related('user').order_by('-status_changed_at')[:5]
-
-    return [
-        {
-            "user": people.user.username,
-            "status": people.status,
-            "status_changed_at": people.status_changed_at
-        }
-        for people in recent_users
-    ] #a return method inside a loop would exit after the first iteration, so we use this.
+    recent_users = list(
+        UserBook.objects.filter(book_id=book_id)
+        .select_related("user")
+        .annotate(activity_at=Coalesce("status_changed_at", "created_at"))
+        .order_by("-activity_at", "-pk")[:5]
+    )
+    # Django usernames are often sign-in emails. Resolve only public handles,
+    # with one batched profile lookup, never one query per activity row.
+    profiles = {
+        profile.account.Email: profile
+        for profile in Profile.objects.select_related("account").filter(
+            account__Email__in=[entry.user.email for entry in recent_users]
+        )
+    }
+    activity = []
+    for entry in recent_users:
+        profile = profiles.get(entry.user.email)
+        if profile:
+            handle = profile.Username.strip() or profile.account.Username.strip()
+        else:
+            handle = entry.user.username.strip()
+        if not handle or "@" in handle:
+            continue
+        activity.append({
+            "user": handle,
+            "user_id": entry.user_id,
+            "status": entry.status,
+            "status_changed_at": entry.activity_at,
+        })
+    return activity
 

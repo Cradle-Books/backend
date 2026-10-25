@@ -1,0 +1,75 @@
+// Community and book-activity browser checks. Requires reader-pages simulation :4906, Next :3104,
+// and isolated Chrome CDP :9231. Uses synthetic fixtures only.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+let socket;
+(async () => {
+  await fetch('http://127.0.0.1:4906/cradle/__test/reset');
+  const pages = await (await fetch('http://127.0.0.1:9231/json')).json();
+  socket = new WebSocket(pages.find(page => page.type === 'page').webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
+  let id = 0; const pending = new Map();
+  socket.onmessage = event => { const data = JSON.parse(event.data); if (data.id) { const item = pending.get(data.id); pending.delete(data.id); data.error ? item.reject(data.error) : item.resolve(data.result); } };
+  const call = (method, params = {}) => new Promise((resolve, reject) => { const next = ++id; pending.set(next, { resolve, reject }); socket.send(JSON.stringify({ id: next, method, params })); });
+  const evaluate = async expression => { const result = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails)); return result.result.value; };
+  const wait = async (expression, label) => { for (let n = 0; n < 100; n++) { if (await evaluate(expression)) return; await new Promise(resolve => setTimeout(resolve, 150)); } throw new Error(`Timed out: ${label}; ${await evaluate('document.body.innerText.slice(-1300)')}`); };
+  const go = async path => { await call('Page.navigate', { url: `http://localhost:3104${path}` }); await wait('document.readyState === "complete"', 'document ready'); };
+  const fill = async (selector, value) => { await evaluate(`(() => { const el=document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(value)}); el.dispatchEvent(new Event('input',{bubbles:true})); })()`); };
+  const select = async (selector, value) => { await evaluate(`(() => { const el=document.querySelector(${JSON.stringify(selector)}); el.value=${JSON.stringify(value)}; el.dispatchEvent(new Event('change',{bubbles:true})); })()`); };
+  const clickText = async (selector, text) => { await evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(el=>el.textContent.trim()===${JSON.stringify(text)}).click()`); };
+  const screenshot = async name => { const shot = await call('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(`.reader-preview/${name}.png`, Buffer.from(shot.data, 'base64')); };
+  const backend = async path => (await fetch(`http://127.0.0.1:4906/cradle${path}`, { headers: { Authorization: 'Bearer fixture-access' } })).json();
+  await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await go('/community'); await evaluate('sessionStorage.clear(); localStorage.removeItem("cradle.appearance")');
+  await go('/community'); await wait('document.body.innerText.includes("Log in to connect")', 'guest login prompt');
+  await go('/books/1'); await wait('document.querySelectorAll(".book-activity-list li").length===3', 'book activity');
+  assert.ok(await evaluate('document.querySelector(".book-activity").innerText.includes("Amina") && document.querySelector(".book-activity").innerText.includes("Tunde")'));
+  assert.ok(await evaluate('document.querySelector(".book-detail-facts").innerText.includes("320")'));
+  assert.ok(!(await evaluate('document.querySelector(".book-activity").innerText.includes("@")')));
+  await evaluate('sessionStorage.setItem("bookapp.access","fixture-access"); sessionStorage.setItem("bookapp.refresh","fixture-refresh"); sessionStorage.setItem("bookapp.username","Reader")');
+  await go('/books/1'); await wait('document.querySelectorAll(".book-activity-list li").length===3', 'authenticated activity');
+  assert.equal(await evaluate('document.querySelector(".book-activity-list li:nth-child(3) div a").getAttribute("href")'), '/profile');
+  await evaluate('document.querySelector(".book-activity-list li:nth-child(2) div a").click()');
+  await wait('document.querySelector(".community-reader-card")?.innerText.includes("Private profile")', 'activity links to private reader');
+  await evaluate('document.querySelector(".community-reader-card button[aria-label=\\\"Follow Tunde\\\"]").click()');
+  await wait('!!document.querySelector("button[aria-label=\\\"Cancel request to Tunde\\\"]")', 'private follow is pending');
+  let social = await backend('/api/auth/follows/');
+  assert.equal(social.outgoing_pending[0].user_id, 13); assert.ok(!social.following.some(row => row.user_id === 13));
+  await screenshot('community-private-reader'); console.log('PASS guest prompt, public/private book activity, page count, profile link, and private pending follow');
+  await clickText('.community-tabs button', 'Requests 3');
+  await wait('!!document.querySelector("button[aria-label=\\\"Approve Zara\\\"]")', 'incoming requests');
+  await evaluate('document.querySelector("button[aria-label=\\\"Approve Zara\\\"]").click()');
+  await wait('!document.querySelector("button[aria-label=\\\"Approve Zara\\\"]")', 'approval removes pending request');
+  await evaluate('document.querySelector("button[aria-label=\\\"Decline Dayo\\\"]").click()');
+  await wait('!document.querySelector("button[aria-label=\\\"Decline Dayo\\\"]")', 'decline removes pending request');
+  await evaluate('document.querySelector("button[aria-label=\\\"Cancel request to Tunde\\\"]").click()');
+  await wait('document.body.innerText.includes("No pending requests sent.")', 'sent request cancelled');
+  social = await backend('/api/auth/follows/'); assert.equal(social.outgoing_pending.length, 0); assert.ok(social.followers.some(row => row.user_id === 14));
+  assert.equal((await backend('/api/auth/follow-requests/')).pending.length, 0);
+  console.log('PASS approve, decline, and cancel use their relationship IDs');
+  await go('/community?reader=Amina'); await wait('!!document.querySelector(".community-reader-card button")', 'public reader ready');
+  await evaluate('document.querySelector(".community-reader-card button[aria-label=\\\"Follow Amina\\\"]").click()');
+  await wait('!!document.querySelector("button[aria-label=\\\"Unfollow Amina\\\"]")', 'public follow accepted');
+  assert.ok((await backend('/api/auth/follows/')).following.some(row => row.user_id === 12));
+  await evaluate('document.querySelector("button[aria-label=\\\"Unfollow Amina\\\"]").click()');
+  await clickText('.community-confirm button', 'Yes, unfollow');
+  await wait('!!document.querySelector(".community-reader-card button[aria-label=\\\"Follow Amina\\\"]")', 'unfollow confirmation');
+  assert.ok(!(await backend('/api/auth/follows/')).following.some(row => row.user_id === 12));
+  await screenshot('community-desktop'); console.log('PASS immediate public follow and confirmed unfollow');
+  await fill('.community-search input', 'no-such-reader'); await evaluate('document.querySelector(".community-search").requestSubmit()');
+  await wait('document.body.innerText.includes("No reader found")', 'search empty state');
+  await fill('.community-search input', 'error'); await evaluate('document.querySelector(".community-search").requestSubmit()');
+  await wait('document.body.innerText.includes("Reader search is temporarily unavailable.")', 'search error');
+  assert.ok(await evaluate('Array.from(document.querySelectorAll("button")).some(button=>button.textContent==="Try again")'));
+  console.log('PASS exact-reader search empty/error handling');
+  for (const width of [390, 768]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: width === 390 });
+    await go('/community?reader=Tunde'); await wait('!!document.querySelector(".community-reader-card")', 'responsive community');
+    assert.ok(await evaluate('document.documentElement.scrollWidth<=innerWidth'), `Community overflow at ${width}`);
+    if (width === 390) await screenshot('community-mobile');
+    await go('/books/1'); await wait('document.querySelectorAll(".book-activity-list li").length===3', 'responsive book activity');
+    assert.ok(await evaluate('document.documentElement.scrollWidth<=innerWidth'), `Book details overflow at ${width}`);
+    if (width === 390) { await evaluate('document.querySelector(".book-activity").scrollIntoView()'); await screenshot('book-activity-mobile'); }
+    console.log(`PASS Community and book activity fit ${width}px viewport`);
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => socket?.close());

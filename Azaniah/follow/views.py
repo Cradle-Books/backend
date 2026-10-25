@@ -177,6 +177,14 @@ class FollowListView(AuthenticatedFollowView):
             .select_related("following")
             .order_by("-created_at")
         )
+        outgoing_pending = (
+            Following.objects.filter(
+                follower=request.user,
+                state=Following.FollowStatus.PENDING,
+            )
+            .select_related("following")
+            .order_by("-created_at")
+        )
         return Response(
             {
                 "followers": [
@@ -186,6 +194,10 @@ class FollowListView(AuthenticatedFollowView):
                 "following": [
                     connection_data(relationship, relationship.following)
                     for relationship in following
+                ],
+                "outgoing_pending": [
+                    connection_data(relationship, relationship.following)
+                    for relationship in outgoing_pending
                 ],
             },
             status=status.HTTP_200_OK,

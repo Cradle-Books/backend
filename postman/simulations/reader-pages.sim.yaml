@@ -1,0 +1,5 @@
+simulation: cradle-reader-pages
+routing: path
+mocks:
+  - routeKey: cradle
+    path: ../mocks/reader-pages/config.yaml
