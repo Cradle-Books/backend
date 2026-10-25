@@ -157,11 +157,13 @@ DEFAULT_FROM_EMAIL = 'no-reply@azaniah.com'
 # Profile link used in notification emails
 PROFILE_URL = 'http://localhost:8000/profile/'
 
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "https://cradle-frontend.onrender.com, http://localhost:3000, http://127.0.0.1:3000",
+        "FRONTEND_URL, http://localhost:3000, http://127.0.0.1:3000",
     ).split(",")
     if origin.strip()
 ]
@@ -170,7 +172,7 @@ CSRF_TRUSTED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "CSRF_TRUSTED_ORIGINS",
-        "https://cradle-frontend.onrender.com, http://localhost:3000, http://127.0.0.1:3000",
+        "FRONTEND_URL, http://localhost:3000, http://127.0.0.1:3000",
     ).split(",")
     if origin.strip()
 ]
