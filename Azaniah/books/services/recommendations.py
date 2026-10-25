@@ -6,7 +6,7 @@ def get_recommendations(user):
 
         #filter books that are currently being read or have been finished
         read_books = user_books.filter(
-            status__in=["reading", "finished"]
+            status__in=["reading", "want", "finished"]
         )
 
 

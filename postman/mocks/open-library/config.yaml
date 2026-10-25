@@ -1,0 +1,9 @@
+version: 1
+name: open-library-search
+slug: open-library-search
+protocol: http
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

@@ -53,70 +53,14 @@ class UserBookProfileTests(TestCase):
         self.assertEqual(profile["finished"], 1)
 
 
-class SearchBookDescriptionTests(TestCase):
-    @patch("Azaniah.books.services.search_books.fetch_google_book")
+class SearchBookCacheTests(TestCase):
     @patch("Azaniah.books.services.search_books.requests.get")
-    def test_open_library_work_description_is_in_final_search_result(
-        self,
-        mock_get,
-        mock_google_book,
-    ):
-        search_response = Mock(status_code=200)
-        search_response.json.return_value = {
-            "docs": [
-                {
-                    "key": "/works/OL123W",
-                    "title": "A Test Book",
-                    "author_name": ["Test Author"],
-                    "subject": ["Fiction"],
-                    "cover_i": 123,
-                    "first_publish_year": 2020,
-                    "ratings_average": 4.2,
-                }
-            ]
-        }
-        work_response = Mock(status_code=200)
-        work_response.json.return_value = {
-            "description": {"value": "Description from the work record."}
-        }
-        mock_get.side_effect = [search_response, work_response]
-
-        result = search_books("A Test Book", page=1, page_size=1)
-
-        self.assertEqual(
-            result["results"][0]["description"],
-            "Description from the work record.",
-        )
-        self.assertEqual(result["results"][0]["average_rating"], 4.2)
-        book = Book.objects.get(external_id="/works/OL123W")
-        self.assertEqual(book.description, "Description from the work record.")
-        self.assertEqual(book.average_rating, 4.2)
-        mock_google_book.assert_not_called()
-
-    @patch("Azaniah.books.services.search_books.fetch_google_book")
-    def test_cached_search_results_are_enriched_before_returning(self, mock_google_book):
-        book = Book.objects.create(
-            title="A Cached Book",
-            author="Test Author",
-            description="",
-            external_id="/works/OL456W",
-        )
-        mock_google_book.return_value = {
-            "description": "Cached description from Google.",
-            "average_rating": 4.3,
-        }
-
-        result = search_books("A Cached Book", page=1, page_size=1)
-
-        book.refresh_from_db()
-        self.assertEqual(result["results"][0]["average_rating"], 4.3)
-        self.assertEqual(
-            result["results"][0]["description"],
-            "Cached description from Google.",
-        )
-        self.assertEqual(book.average_rating, 4.3)
-        self.assertEqual(book.description, "Cached description from Google.")
-        mock_google_book.assert_called_once_with("A Cached Book", "Test Author")
+    def test_complete_cached_page_needs_no_external_enrichment(self, mock_get):
+        book = Book.objects.create(title="Cached Book", author="Test Author", description="", external_id="/works/CACHED")
+        result = search_books("Test Author", page=1, page_size=1)
+        self.assertEqual(result["source"], "db")
+        self.assertEqual(result["results"][0]["id"], book.id)
+        mock_get.assert_not_called()
 
 
 class GoogleBooksMetadataTests(TestCase):

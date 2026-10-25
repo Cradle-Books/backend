@@ -39,6 +39,7 @@ if render_hostname and render_hostname not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(render_hostname)
 
 API_KEY = os.getenv("API_KEY")
+OPEN_LIBRARY_BASE_URL = os.getenv("OPEN_LIBRARY_BASE_URL", "https://openlibrary.org")
 
 # Application definition
 
@@ -164,6 +165,7 @@ DEFAULT_FRONTEND_ORIGINS = ",".join(filter(None, [
     "http://127.0.0.1:3000",
 ]))
 
+#allows the listed frontend URLs to read the backend responses
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(

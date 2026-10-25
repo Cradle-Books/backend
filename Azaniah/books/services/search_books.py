@@ -1,49 +1,18 @@
 import requests
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from django.db.models import Q
 from ..models import Book
-from .google_books import fetch_google_book
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
-
-
-def _enrich_cached_books(books):
-    incomplete_books = [
-        book
-        for book in books
-        if not book.description or book.average_rating is None
-    ]
-    if not incomplete_books:
-        return
-
-    with ThreadPoolExecutor(max_workers=min(4, len(incomplete_books))) as executor:
-        lookups = executor.map(
-            lambda book: (book, fetch_google_book(book.title, book.author)),
-            incomplete_books,
-        )
-        for book, google_data in lookups:
-            if not google_data:
-                continue
-
-            changed_fields = []
-            if not book.description and google_data.get("description"):
-                book.description = google_data["description"]
-                changed_fields.append("description")
-            if book.average_rating is None and google_data.get("average_rating") is not None:
-                book.average_rating = google_data["average_rating"]
-                changed_fields.append("average_rating")
-            if changed_fields:
-                book.save(update_fields=changed_fields)
 
 
 def search_books(query, page, page_size):
     start = (page - 1) * page_size
     end = page * page_size
 
-    db_books = Book.objects.filter(Q(title__icontains=query)).order_by("id")
+    db_books = Book.objects.filter(Q(title__icontains=query) | Q(author__icontains=query)).order_by("id")
     db_results = list(db_books[start:end])
-    _enrich_cached_books(db_results)
     results = [
         {
             "id": book.id,
@@ -64,17 +33,23 @@ def search_books(query, page, page_size):
     needed = page_size - len(results)
     try:
         response = requests.get(
-            "https://openlibrary.org/search.json",
-            params={"q": query, "page": page, "limit": page_size},
-            timeout=10,
+            f"{settings.OPEN_LIBRARY_BASE_URL.rstrip('/')}/search.json",
+            params={
+                "q": query, "page": page, "limit": page_size,
+                "fields": "key,title,author_name,cover_i,first_publish_year,subject,ratings_average,edition_count",
+            },
+            timeout=(3, 10),
         )
-    except requests.RequestException:
-        return {"error": "Open Library search request failed"}
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict) or not isinstance(data.get("docs"), list):
+            raise ValueError("Invalid Open Library search response")
+    except (requests.RequestException, ValueError) as error:
+        logger.warning("Open Library search unavailable: %s", error)
+        if results:
+            return {"source": "db", "results": results}
+        return {"error": "Book search is temporarily unavailable. Please try again."}
 
-    if response.status_code != 200:
-        return {"error": "API was unable to process the request"}
-
-    data = response.json()
     docs = sorted(
         data.get("docs", []),
         key=lambda item: item.get("edition_count", 0),
@@ -94,28 +69,13 @@ def search_books(query, page, page_size):
             continue
 
         work_id = item["key"]
+        if not work_id.startswith("/works/"):
+            work_id = f"/works/{work_id}"
         description = None
-        genres = item.get("subject", [])[:3]
+        genres = (item.get("subject") or [])[:3]
 
-        # The search document's key is a work ID; fetch that work's metadata.
-        try:
-            details_response = requests.get(
-                f"https://openlibrary.org{work_id}.json",
-                timeout=10,
-            )
-            if details_response.status_code == 200:
-                details_data = details_response.json()
-                raw_description = details_data.get("description")
-                if isinstance(raw_description, dict):
-                    description = raw_description.get("value")
-                elif isinstance(raw_description, str):
-                    description = raw_description
-                if not genres:
-                    genres = details_data.get("subjects", [])[:3]
-        except requests.RequestException:
-            logger.warning("Open Library work lookup failed for %s", work_id, exc_info=True)
-
-        author = item.get("author_name", ["Unknown Author"])[0]
+        # Fetch full descriptions only when a reader opens book details.
+        author = (item.get("author_name") or ["Unknown Author"])[0]
         cover_id = item.get("cover_i")
         cover = (
             f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
@@ -123,21 +83,8 @@ def search_books(query, page, page_size):
             else None
         )
         average_rating = item.get("ratings_average")
-        google_data = None
-        google_books_id = None
-
-        if not description or not genres or not cover or average_rating is None:
-            google_data = fetch_google_book(title, author)
-            if google_data:
-                description = description or google_data.get("description")
-                genres = genres or google_data.get("genre", [])
-                cover = cover or google_data.get("cover")
-                google_books_id = google_data.get("google_books_id")
-                average_rating = average_rating or google_data.get("average_rating")
-
         book_data = {
             "external_id": work_id,
-            "google_books_id": google_books_id,
             "title": title,
             "author": author,
             "release_date": item.get("first_publish_year"),
@@ -158,7 +105,6 @@ def search_books(query, page, page_size):
                 "description",
                 "cover",
                 "genre",
-                "google_books_id",
                 "average_rating",
             ):
                 value = book_data[field]
@@ -171,6 +117,7 @@ def search_books(query, page, page_size):
         if book_obj.id in existing_ids:
             continue
 
+        existing_ids.add(book_obj.id)
         clean_books.append(
             {
                 "id": book_obj.id,

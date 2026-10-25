@@ -1,0 +1,5 @@
+simulation: cradle-search
+routing: path
+mocks:
+  - routeKey: open-library
+    path: ../mocks/open-library/config.yaml
