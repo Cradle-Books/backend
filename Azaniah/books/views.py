@@ -200,6 +200,7 @@ class TrendingView(APIView):
         
 class RecommendationView(APIView):
     #only authenticated users can get recommendations
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):

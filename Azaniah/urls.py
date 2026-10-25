@@ -22,4 +22,5 @@ urlpatterns = [
     path('api/auth/', include('Azaniah.authentication.urls')),
     path('api/auth/', include('Azaniah.follow.urls')),
     path('api/books/', include('Azaniah.books.urls')),
+    path('api/chat/', include('Azaniah.chatapp.urls')),
 ]

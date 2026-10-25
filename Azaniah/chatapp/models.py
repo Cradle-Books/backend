@@ -27,3 +27,12 @@ class Message(models.Model): #represents a single text in a conversation
     class Meta:
         ordering = ['created_at', 'id'] #messages are ordered by creation time, and then by id to break ties
 
+class WebSocketTicket(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete = models.CASCADE,
+        related_name = "websocket_tickets",
+    )
+    token_hash = models.CharField(max_length = 64, unique = True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null = True, blank = True)

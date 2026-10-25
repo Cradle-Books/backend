@@ -205,14 +205,14 @@ class AccountProfileView(APIView):
         if not email:
             return Response(
                 {"message": "The authenticated user has no email address."},
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
             account = Account.objects.get(Email=email)
             try:
                 profile = Profile.objects.get(account=account)
-            except Profile.DoesNotExist:
+            except profile.DoesNotExist:
                 return Response(
                     {"message": "Profile doesn't exist"},
                     status=status.HTTP_404_NOT_FOUND,
